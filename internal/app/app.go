@@ -214,17 +214,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ErrorMsg:
 		a.state.Error = msg.Err.Error()
 		return a, nil
-
-	// Handle help close
-	case closeHelpMsg:
-		a.state.CloseModal()
-		return a, nil
 	}
 
 	return a, nil
 }
-
-type closeHelpMsg struct{}
 
 func (a *App) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch a.state.ActiveModal {

@@ -68,3 +68,6 @@ type WindowResizeMsg struct {
 	Width  int
 	Height int
 }
+
+// CloseModalMsg is sent when a modal should be closed
+type CloseModalMsg struct{}

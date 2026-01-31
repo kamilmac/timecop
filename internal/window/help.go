@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/kmacinski/blocks/internal/keys"
 	"github.com/kmacinski/blocks/internal/ui"
 )
 
@@ -23,20 +21,10 @@ func NewHelp(styles ui.Styles) *Help {
 	}
 }
 
-// Update handles input
+// Update handles input (modal keys handled by app)
 func (h *Help) Update(msg tea.Msg) (Window, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		switch {
-		case key.Matches(msg, keys.DefaultKeyMap.Help), key.Matches(msg, keys.DefaultKeyMap.Escape):
-			// Close help - signal via command
-			return h, func() tea.Msg { return closeHelpMsg{} }
-		}
-	}
 	return h, nil
 }
-
-type closeHelpMsg struct{}
 
 // View renders the help content
 func (h *Help) View(width, height int) string {
