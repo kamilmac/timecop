@@ -26,29 +26,31 @@ A lightweight TUI that serves as your primary interface when working with AI:
 - **Changed files** - what did the AI touch?
 - **Diff view** - what exactly changed?
 - **Commit history** - what's been done on this branch?
+- **All files** - browse the entire codebase
 - **Docs** - your specs alongside the implementation (future)
 
-## Core Features
+## Features
 
-### MVP
-- Display list of changed files (git status)
-- Show unified diff for selected file
-- Vim-style navigation (`j`/`k`)
-- Auto-refresh on file changes
-- Syntax highlighting for diffs (+ green, - red)
-- Quit with `q`
-
-### Near-term
-- Status bar (branch, mode, file count)
-- Yank path (`y` to copy file path to clipboard)
-- Open in editor (`o` to open in $EDITOR)
-- Tree view for file list
+### Implemented
+- [x] Display list of changed files (git status)
+- [x] Tree view for file list with directories
+- [x] Show unified diff for selected file
+- [x] Vim-style navigation (`j`/`k`)
+- [x] Auto-refresh on file changes (500ms debounce via fsnotify)
+- [x] Syntax highlighting for diffs (+ green, - red)
+- [x] Status bar (branch, mode, file count, diff stats)
+- [x] Yank path (`y` to copy file path to clipboard)
+- [x] Open in editor (`o` to open in $EDITOR)
+- [x] CommitList window showing branch commits
+- [x] Help modal with keybindings
+- [x] All files mode (`a` to toggle) - view entire repo
+- [x] File content viewer for unchanged files
 
 ### Future
-- FileExplorer - full project tree navigation
-- Docs integration - view/navigate markdown specs alongside code changes
-- Side-by-side diff view
-- Hooks/events for integration with AI agents (Claude Code, Cursor, Aider, etc.)
+- [ ] FileExplorer - full project tree navigation with expand/collapse
+- [ ] Docs integration - view/navigate markdown specs alongside code changes
+- [ ] Side-by-side diff view
+- [ ] Hooks/events for integration with AI agents (Claude Code, Cursor, Aider, etc.)
 
 ## Architecture
 
@@ -67,10 +69,10 @@ Windows implement a common interface. Layout doesn't care what type they are.
 
 | Window | Description |
 |--------|-------------|
-| `FileList` | List of changed files with status |
-| `DiffView` | Diff preview for selected file |
-| `CommitList` | List of commits on current branch |
-| `Help` | Keybinding reference |
+| `FileList` | Tree view of changed files with status indicators |
+| `DiffView` | Diff preview for selected file (or file content for unchanged files) |
+| `CommitList` | List of commits on current branch (always visible) |
+| `Help` | Keybinding reference (modal) |
 
 Each window:
 - Has its own state (cursor position, scroll offset, etc.)
@@ -78,190 +80,89 @@ Each window:
 - Renders itself given width/height (doesn't know about layout)
 - Handles its own key events when focused
 
-### Diff Modes
-The diff view can operate in different modes:
+### Modes
 
-| Mode | Command | Description |
-|------|---------|-------------|
-| Working | `git diff` | Uncommitted changes (what AI just did) |
-| Branch | `git diff master...HEAD` | All changes on branch vs master |
+#### Diff Modes
+Control what changes are compared:
 
-Switch modes with `1` (working) or `2` (branch).
+| Mode | Key | Command | Description |
+|------|-----|---------|-------------|
+| Working | `1` | `git diff` | Uncommitted changes only |
+| Branch | `2` | `git diff <base>` | All changes on branch vs base (including uncommitted) |
 
-The `FileList` window adapts based on mode:
-- **Working**: Shows files with uncommitted changes
-- **Branch**: Shows all files changed on branch vs master
+Default mode is **Branch**.
+
+#### File View Modes
+Control what files are shown (independent of diff mode):
+
+| Mode | Key | Description |
+|------|-----|-------------|
+| Changed | default | Only files with changes |
+| All | `a` | All tracked files in repository |
+
+When viewing all files, selecting an unchanged file shows its full content instead of an empty diff.
 
 ### Layouts
 
 Layouts define slot structure. They don't know about window types.
 
 ```
-2-slot layout                   3-slot layout (stacked left)
-┌───────────┬───────────────┐   ┌───────────┬───────────────┐
-│           │               │   │   slot1   │               │
-│   slot1   │    slot2      │   ├───────────┤    slot2      │
-│           │               │   │   slot3   │               │
-└───────────┴───────────────┘   └───────────┴───────────────┘
-
-Stacked layout
-┌─────────────────────────┐
-│         slot1           │
-├─────────────────────────┤
-│         slot2           │
-└─────────────────────────┘
+ThreeSlot (width >= 80)           StackedThree (width < 80)
+┌───────────┬───────────────┐     ┌─────────────────────────┐
+│  left-top │               │     │          top            │
+├───────────┤    right      │     ├─────────────────────────┤
+│left-bottom│               │     │         middle          │
+└───────────┴───────────────┘     ├─────────────────────────┤
+                                  │         bottom          │
+                                  └─────────────────────────┘
 ```
 
-Window assignment is separate:
+Window assignments:
 ```go
-// Example: assign windows to slots
 assignments := map[string]string{
-    "slot1": "FileList",
-    "slot2": "DiffView",
-    "slot3": "CommitList",  // only used if slot exists
-}
-```
-
-### Layout Definition
-
-```go
-type Layout struct {
-    Name      string
-    Direction string  // "horizontal" or "vertical"
-    Slots     []Slot
-    Ratios    []int   // size ratios for slots
-}
-
-type Slot struct {
-    Name      string
-    // If slot contains nested slots:
-    Direction string
-    Children  []Slot
-    Ratios    []int
-}
-```
-
-**Predefined layouts:**
-
-```go
-var TwoColumn = Layout{
-    Name:      "two-column",
-    Direction: "horizontal",
-    Ratios:    []int{30, 70},
-    Slots: []Slot{
-        {Name: "left"},
-        {Name: "right"},
-    },
-}
-
-var ThreeSlot = Layout{
-    Name:      "three-slot",
-    Direction: "horizontal",
-    Ratios:    []int{30, 70},
-    Slots: []Slot{
-        {
-            Name:      "left",
-            Direction: "vertical",
-            Ratios:    []int{60, 40},
-            Children: []Slot{
-                {Name: "left-top"},
-                {Name: "left-bottom"},
-            },
-        },
-        {Name: "right"},
-    },
-}
-
-var Stacked = Layout{
-    Name:      "stacked",
-    Direction: "vertical",
-    Ratios:    []int{30, 70},
-    Slots: []Slot{
-        {Name: "top"},
-        {Name: "bottom"},
-    },
+    // ThreeSlot layout
+    "left-top":    "filelist",
+    "left-bottom": "commitlist",
+    "right":       "diffview",
+    // StackedThree layout
+    "top":    "filelist",
+    "middle": "diffview",
+    "bottom": "commitlist",
 }
 ```
 
 ### Modal Presentation
 
-Modal is a way to display any window floating over the layout.
+Help window is displayed as a modal overlay, centered on screen.
 
 ```
 ┌───────────┬───────────────┐
 │           │ ┌───────────┐ │
-│  slot1    │ │  Window   │ │
+│  slot1    │ │   Help    │ │
 ├───────────┤ │  (modal)  │ │
 │  slot2    │ │           │ │
 │           │ └───────────┘ │
 └───────────┴───────────────┘
 ```
 
-```go
-type ModalState struct {
-    Active  bool
-    Window  Window  // any window
-    Width   int     // percentage of screen
-    Height  int     // percentage of screen
-}
-```
-
-Example: `?` opens Help window as a modal. Same Help window could theoretically be assigned to a slot instead.
-
-### Responsive Layouts
-
-Layouts switch based on terminal size via breakpoints.
-
-```go
-type ResponsiveConfig struct {
-    Breakpoints []Breakpoint
-}
-
-type Breakpoint struct {
-    MinWidth int    // 0 means no minimum
-    Layout   string // layout name to use
-}
-```
-
-Example:
-```go
-var Responsive = ResponsiveConfig{
-    Breakpoints: []Breakpoint{
-        {MinWidth: 120, Layout: "three-slot"},
-        {MinWidth: 80,  Layout: "two-column"},
-        {MinWidth: 0,   Layout: "stacked"},
-    },
-}
-```
-
-```
-Wide (120+)              Medium (80-119)         Narrow (<80)
-┌───────┬───────────┐    ┌───────┬─────────┐    ┌─────────────┐
-│ left  │           │    │       │         │    │    top      │
-│ top   │   right   │    │ left  │  right  │    ├─────────────┤
-├───────┤           │    │       │         │    │   bottom    │
-│ left  │           │    │       │         │    │             │
-│bottom │           │    │       │         │    │             │
-└───────┴───────────┘    └───────┴─────────┘    └─────────────┘
-```
-
-Windows are assigned to slots by name. When layout changes, windows remap to available slots (e.g., "left" in two-column, "left-top" in three-slot could both receive FileList).
-
 ## Default UI
 
 ```
 ┌─────────────────────┬────────────────────────────────────┐
-│ Changed Files       │ Diff Preview                       │
+│ Files (4)           │ Diff                               │
+│ ▼ src/              │ @@ -10,6 +10,8 @@                  │
+│   > main.go      M  │  func main() {                     │
+│     app.go       M  │ -    oldLine()                     │
+│ ▼ internal/         │ +    newLine()                     │
+│   ▼ git/            │ +    anotherLine()                 │
+│       git.go     A  │  }                                 │
+│   README.md      M  │                                    │
 ├─────────────────────┤                                    │
-│ > src/main.go    M  │ @@ -10,6 +10,8 @@                  │
-│   src/ui.go      M  │  func main() {                     │
-│   README.md      A  │ -    oldLine()                     │
-│   go.mod         M  │ +    newLine()                     │
-│                     │ +    anotherLine()                 │
-│                     │  }                                 │
-│                     │                                    │
+│ Commits (2)         │                                    │
+│ > abc123 Add feat...│                                    │
+│   def456 Fix bug... │                                    │
 ├─────────────────────┴────────────────────────────────────┤
-│ feature/blocks  [working]  4 files  +127 -43             │
+│ feature/blocks  [branch]  4 files  +127 -43              │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -271,69 +172,56 @@ Shows at-a-glance context:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│ feature/blocks  [working]  4 files  +127 -43             │
+│ feature/blocks  [branch] [all]  4 files  +127 -43        │
 └──────────────────────────────────────────────────────────┘
-  │                │          │        │
-  │                │          │        └── Total diff stats
-  │                │          └── File count
+  │                │      │       │        │
+  │                │      │       │        └── Total diff stats
+  │                │      │       └── File count
+  │                │      └── All files mode indicator (when active)
   │                └── Current diff mode
   └── Current branch
 ```
 
-Optional elements (shown when relevant):
-- `↑2 ↓0` - ahead/behind remote
-- `[no changes]` - when working tree is clean
-
 ## FileList Window
 
-### Display Modes
+### Tree View
 
-**Flat list** (default, MVP)
-```
-src/main.go           M
-src/app.go            M
-internal/git/git.go   A
-README.md             M
-```
-- Full relative path
-- Sorted alphabetically by path
-- Simple j/k navigation
-
-**Tree view** (future iteration)
+Files are displayed as a tree with directories:
 ```
 ▼ src/
-    main.go           M
+  > main.go           M
     app.go            M
 ▼ internal/
   ▼ git/
       git.go          A
-README.md             M
+  README.md           M
 ```
-- Collapsible directories
-- `Enter` or `l` to expand, `h` to collapse
-- Remember expanded state per session
+- Directories shown with `▼` prefix in muted style
+- Navigation skips directory entries (cursor only on files)
+- `j`/`k` for up/down, `g`/`G` for top/bottom
 
-Toggle between modes with keybinding (e.g., `t`).
+### Content by Mode
 
-### Content by Diff Mode
-
-| Mode | Shows |
-|------|-------|
-| Working | Files with uncommitted changes (`git status`) |
-| Branch | All files changed vs base branch (`git diff --name-status main...HEAD`) |
+| Diff Mode | File View | Shows |
+|-----------|-----------|-------|
+| Working | Changed | Files with uncommitted changes |
+| Working | All | All files, status from `git status` |
+| Branch | Changed | Files changed vs base branch |
+| Branch | All | All files, status from branch diff |
 
 ### Status Indicators
-- `M` - Modified
-- `A` - Added
-- `D` - Deleted
-- `?` - Untracked (working mode only)
-- `R` - Renamed
+- `M` - Modified (orange)
+- `A` - Added (green)
+- `D` - Deleted (red)
+- `?` - Untracked (muted)
+- `R` - Renamed (purple)
+- ` ` - Unchanged (no indicator, in all files mode)
 
 ## DiffView Window
 
 ### Display Format
 
-**Unified diff** (MVP)
+Unified diff with syntax highlighting:
 ```
 @@ -10,6 +10,8 @@ func main()
  context line
@@ -342,31 +230,28 @@ Toggle between modes with keybinding (e.g., `t`).
 +another new line
  context line
 ```
-- Standard git diff output
-- Colorized: green for `+`, red for `-`, cyan for `@@`
-- No transformation needed, display git output directly
 
-**Side-by-side** (future, maybe)
-```
-│ old                │ new                │
-│ removed line       │                    │
-│                    │ added line         │
-```
-- Requires parsing and alignment
-- Needs more terminal width
+Colors:
+- Green (`#a6e3a1`) for additions (`+`)
+- Red (`#f38ba8`) for removals (`-`)
+- Cyan/Blue for `@@` headers
+- Muted for file metadata (`diff`, `index`, `---`, `+++`)
 
 ### Scrolling
 
-Uses `bubbles/viewport`:
-- `j`/`k` or arrows: scroll line by line
+- `j`/`k`: scroll line by line
 - `Ctrl+d`/`Ctrl+u`: half-page scroll
 - `g`/`G`: top/bottom
-- Mouse wheel (if terminal supports)
 
-### Content by Selection
+Title shows scroll position (top/bot/percentage).
 
-- When file selected in FileList → show diff for that file
-- When no selection → show combined diff for all files (or empty state)
+### Content
+
+- File selected with changes → show diff
+- File selected without changes (all files mode) → show file content
+- No selection → empty state message
+
+Large diffs truncated at 10,000 lines with message.
 
 ## Keybindings
 
@@ -375,10 +260,11 @@ Uses `bubbles/viewport`:
 | `j` / `↓` | Move down in list / scroll diff |
 | `k` / `↑` | Move up in list / scroll diff |
 | `h` / `l` | Switch focused window |
+| `Tab` / `Shift+Tab` | Cycle through windows |
 | `Ctrl+d` | Scroll diff half-page down |
 | `Ctrl+u` | Scroll diff half-page up |
-| `g` | Go to top (diff) |
-| `G` | Go to bottom (diff) |
+| `g` | Go to top |
+| `G` | Go to bottom |
 | `Enter` | Select item |
 | `Escape` | Close modal / unfocus |
 | `q` | Quit |
@@ -387,55 +273,8 @@ Uses `bubbles/viewport`:
 | `o` | Open file in $EDITOR |
 | `?` | Toggle help modal |
 | `1` | Working diff mode |
-| `2` | Branch diff mode (vs master) |
-| `t` | Toggle tree/flat view (future) |
-| `Tab` | Cycle through windows |
-
-## Configuration
-
-Config lives in code, not external files. Keeps things simple for now.
-
-```go
-// config/config.go
-
-type Config struct {
-    DefaultMode  string // "working" or "branch"
-    BaseBranch   string // "main", "master", or auto-detect
-
-    Layout       LayoutConfig
-    Keys         KeyConfig
-    Colors       ColorConfig
-}
-
-type LayoutConfig struct {
-    DefaultRatio [2]int // left:right ratio, e.g. {30, 70}
-}
-
-type ColorConfig struct {
-    Added          string
-    Removed        string
-    Context        string
-    BorderFocused  string
-    BorderUnfocused string
-}
-
-var Default = Config{
-    DefaultMode: "working",
-    BaseBranch:  "", // auto-detect main/master
-    Layout: LayoutConfig{
-        DefaultRatio: [2]int{30, 70},
-    },
-    Colors: ColorConfig{
-        Added:           "#a6e3a1",
-        Removed:         "#f38ba8",
-        Context:         "#cdd6f4",
-        BorderFocused:   "#89b4fa",
-        BorderUnfocused: "#45475a",
-    },
-}
-```
-
-External config file can be added later if needed.
+| `2` | Branch diff mode |
+| `a` | Toggle all files view |
 
 ## CLI Arguments
 
@@ -446,300 +285,152 @@ Arguments:
   path              Target directory (default: current dir)
 
 Flags:
-  -m, --mode        Start in mode: working, branch (default: working)
+  -m, --mode        Start in mode: working, branch (default: branch)
   -b, --base        Base branch for branch mode (default: auto-detect)
   -h, --help        Show help
   -v, --version     Show version
 ```
+
+## Auto-Refresh
+
+File changes are detected via fsnotify watching:
+- `.git/index` - staging changes
+- `.git/HEAD` - branch changes
+- `.git/refs/heads/` - commits
+- Working directory (excluding `.git`, `node_modules`, `vendor`, `__pycache__`, hidden dirs)
+
+Changes trigger refresh after 500ms debounce.
+
+## Git Integration
+
+### Base Branch Detection
+1. Try configured base branch (via `--base` flag)
+2. Try `git config init.defaultBranch`
+3. Try common names: `main`, `master`
+4. Try remotes: `origin/main`, `origin/master`
+
+### CommitList Content
+- On feature branch: `git log <base>..HEAD`
+- On base branch: `git log origin/<branch>..HEAD` (unpushed commits)
+- No remote: Recent 20 commits
 
 ## Error States
 
 | Condition | Behavior |
 |-----------|----------|
 | Not a git repo | Show message: "Not a git repository" with hint |
-| No changes | Show empty state: "No changes" (mode-aware message) |
-| Git command fails | Show error in status bar, keep last good state |
-| Base branch not found | Fall back to HEAD~10 or show config hint |
-
-## Similar Tools & Differentiation
-
-| Tool | Focus | Gap |
-|------|-------|-----|
-| [diffnav](https://github.com/dlvhdr/diffnav) | Git diff with file tree | No branch diff mode, no commit list |
-| [critique](https://github.com/remorses/critique) | AI change review | Requires Bun, focused on explanations |
-| [tuicr](https://github.com/agavra/tuicr) | Human-in-loop AI review | Narrower scope |
-| [GitUI](https://github.com/gitui-org/gitui) | Full git TUI | Built for git ops, not AI workflow |
-| VS Code / Cursor | Traditional IDE | Built for human writing code |
-
-**Blocks differentiators:**
-- Branch diff mode (see all work vs master, not just uncommitted)
-- Docs integration (specs alongside implementation)
-- Read-first design (review, don't edit)
-- AI-native workflow (companion, not replacement for agent)
+| No changes | Show empty state: "No changes" |
+| Git command fails | Show error, keep last good state |
+| Base branch not found | Fall back gracefully |
+| Large diffs | Truncate at 10,000 lines with message |
 
 ## Technical Stack
 
 - **Language**: Go
 - **TUI Framework**: Bubbletea
 - **Styling**: Lipgloss
-- **Git Operations**: Shell out to git CLI (simpler than go-git for our needs)
+- **File Watching**: fsnotify
+- **Git Operations**: Shell out to git CLI
 
 ## Project Structure
 
 ```
 blocks/
-├── main.go                 # Entry point only - parse flags, start app
-├── cmd/
-│   └── root.go             # CLI setup (cobra if needed later)
+├── main.go                 # Entry point, CLI flags, app bootstrap
 ├── internal/
 │   ├── app/
-│   │   ├── app.go          # tea.Model, Init, top-level Update/View
-│   │   ├── state.go        # Shared state struct & state transitions
+│   │   ├── app.go          # tea.Model, orchestration, Update/View
+│   │   ├── state.go        # Shared state struct & transitions
 │   │   └── messages.go     # All message types
 │   ├── config/
 │   │   └── config.go       # Config structs & defaults
 │   ├── layout/
-│   │   ├── layout.go       # Layout tree & rendering
-│   │   ├── node.go         # LayoutNode types
-│   │   └── presets.go      # Built-in layout presets
+│   │   └── layout.go       # Layout definitions & rendering
 │   ├── window/
 │   │   ├── window.go       # Window interface
 │   │   ├── base.go         # Common window functionality
-│   │   ├── filelist.go     # FileList implementation
-│   │   ├── diffview.go     # DiffView implementation
-│   │   ├── commitlist.go   # CommitList implementation
-│   │   └── help.go         # Help modal implementation
+│   │   ├── filelist.go     # FileList with tree view
+│   │   ├── diffview.go     # DiffView with syntax highlighting
+│   │   ├── commitlist.go   # CommitList
+│   │   └── help.go         # Help modal
 │   ├── git/
-│   │   ├── git.go          # Git interface
-│   │   ├── status.go       # File status operations
-│   │   ├── diff.go         # Diff operations
-│   │   └── log.go          # Commit log operations
+│   │   ├── git.go          # Types, interface, enums
+│   │   └── client.go       # GitClient implementation
+│   ├── watcher/
+│   │   └── watcher.go      # File system watcher
 │   ├── ui/
 │   │   ├── styles.go       # Lipgloss styles
-│   │   ├── colors.go       # Color definitions
-│   │   └── borders.go      # Border helpers
+│   │   └── colors.go       # Color palette
 │   └── keys/
-│       └── keys.go         # Key definitions & help text
+│       └── keys.go         # Keybinding definitions
+├── docs/
+│   └── design.md
 ├── go.mod
-├── go.sum
-└── docs/
-    └── design.md
+└── go.sum
 ```
 
-## Code Architecture
-
-### Principles
-
-1. **Single responsibility** - Each package does one thing
-2. **Dependency injection** - Pass dependencies, don't import globals
-3. **Interface boundaries** - Packages communicate via interfaces
-4. **Testable** - Business logic separated from TUI rendering
-
-### Package Dependencies
-
-```
-main
-  └── app
-        ├── config
-        ├── layout
-        │     └── window (interface only)
-        ├── window
-        │     ├── git
-        │     └── ui
-        ├── git
-        ├── ui
-        └── keys
-```
-
-### Key Interfaces
+## Key Interfaces
 
 ```go
 // window/window.go
 type Window interface {
-    // Update handles input when focused
     Update(msg tea.Msg) (Window, tea.Cmd)
-
-    // View renders the window content
     View(width, height int) string
-
-    // Focus state
     Focused() bool
     SetFocus(bool)
-
-    // Identity
     Name() string
 }
 
 // git/git.go
-type GitClient interface {
-    // Status returns changed files
-    Status() ([]FileStatus, error)
-
-    // Diff returns diff for a file (or all files if empty)
-    Diff(file string, mode DiffMode) (string, error)
-
-    // Log returns commits on current branch vs base
-    Log(base string) ([]Commit, error)
-
-    // BaseBranch detects main/master
+type Client interface {
+    Status(mode DiffMode) ([]FileStatus, error)
+    ListAllFiles() ([]FileStatus, error)
+    Diff(path string, mode DiffMode) (string, error)
+    ReadFile(path string) (string, error)
+    Log() ([]Commit, error)
     BaseBranch() (string, error)
-}
-
-// layout/layout.go
-type Layout interface {
-    // Render renders all windows in the layout
-    Render(width, height int, windows map[string]Window) string
-
-    // FocusNext moves focus to next window
-    FocusNext()
-
-    // FocusPrev moves focus to previous window
-    FocusPrev()
-
-    // FocusedWindow returns currently focused window name
-    FocusedWindow() string
+    CurrentBranch() (string, error)
+    DiffStats(mode DiffMode) (added, removed int, err error)
+    IsRepo() bool
 }
 ```
 
-### State Management
+## State Management
 
-State is centralized in App. Features communicate via messages.
+Centralized state with message-based updates (Elm architecture):
 
 ```go
-// state.go - shared state
 type State struct {
-    // Selection
-    SelectedFile string
-    DiffMode     DiffMode
-
-    // Data
-    Files   []FileStatus
-    Diff    string
-    Commits []Commit
-
-    // UI
+    SelectedFile  string
+    SelectedIndex int
+    DiffMode      DiffMode      // Working or Branch
+    ShowAllFiles  bool          // Toggle for all files view
+    Files         []FileStatus
+    Diff          string
+    Commits       []Commit
+    Branch        string
+    BaseBranch    string
+    DiffAdded     int
+    DiffRemoved   int
     FocusedWindow string
-    ActiveModal   string  // empty if no modal
-}
-
-// State transitions
-func (s *State) SelectFile(path string) {
-    s.SelectedFile = path
-}
-
-func (s *State) SetDiffMode(mode DiffMode) {
-    s.DiffMode = mode
-    s.SelectedFile = ""  // reset selection on mode change
+    ActiveModal   string
+    Error         string
 }
 ```
 
-```go
-// messages.go - all message types
-type FileSelectedMsg struct{ Path string }
-type DiffModeChangedMsg struct{ Mode DiffMode }
-type FilesLoadedMsg struct{ Files []FileStatus }
-type DiffLoadedMsg struct{ Content string }
-type CommitsLoadedMsg struct{ Commits []Commit }
-type ErrorMsg struct{ Err error }
+Message flow:
+```
+User Input → App.Update() → Global keys or delegate to window
+    → Window returns command → App receives message
+    → State update → Re-render
 ```
 
-### Message Flow
-
-```
-User Input
-    │
-    ▼
-App.Update()
-    │
-    ├── Global keys (quit, mode switch, modal toggle)
-    │
-    └── Delegate to focused feature
-            │
-            ▼
-        Feature.Update()
-            │
-            └── Returns command (emits message)
-                    │
-                    ▼
-                App.Update() receives message
-                    │
-                    └── Updates State, triggers re-render
-```
-
-## Development Phases
-
-### Phase 1: Foundation
-- [ ] Initialize Go module with dependencies
-- [ ] Set up project structure (internal/, cmd/)
-- [ ] Define core interfaces (Window, GitClient, Layout)
-- [ ] Config package with defaults
-- [ ] Basic app skeleton with tea.Model
-
-### Phase 2: UI Framework
-- [ ] Styles package (colors, borders)
-- [ ] Keys package (keybindings)
-- [ ] Base window implementation
-- [ ] Layout node types
-- [ ] Horizontal split rendering
-
-### Phase 3: Windows (with mock data)
-- [ ] FileList window with j/k navigation
-- [ ] DiffView window with scrolling
-- [ ] Focus management between windows
-- [ ] Help modal (floating)
-
-### Phase 4: Git Integration
-- [ ] GitClient implementation (shell out to git)
-- [ ] Status parsing
-- [ ] Diff parsing with highlighting
-- [ ] Wire windows to git client
-- [ ] Diff mode switching (working/branch)
-
-### Phase 5: CommitList & Polish
-- [ ] CommitList window
-- [ ] Log parsing
-- [ ] Layout presets
-- [ ] Responsive collapse behavior
-- [ ] Error states (no repo, no changes)
-
-
-## Decisions
-
-### Large Diffs
-Truncate at 10,000 lines. Show hint: `[truncated - showing first 10,000 lines]`
-
-Binary files display git's default message: `Binary files a/foo.png and b/foo.png differ`
-
-### Base Branch Detection
-Hybrid approach:
-1. Try `git config init.defaultBranch`
-2. Try common names: `main`, `master`
-3. Try remotes: `origin/main`, `origin/master`
-4. If all fail: show error with hint to use `--base` flag
-
-### CommitList Content
-Show branch commits only: `git log <base>..HEAD`
-
-When on base branch (e.g., working directly on main):
-- Compare against remote: `git log origin/main..HEAD` (unpushed commits)
-- If no remote or nothing unpushed: show empty state "No commits ahead"
-
-## To Explore: Docs Integration
+## Future: Docs Integration
 
 The workflow: write markdown specs → AI implements → review changes.
 
-Docs are first-class in this workflow. Potential features:
-
-| Idea | Description |
-|------|-------------|
-| **DocsList** | Window showing project docs (*.md files) |
-| **DocsView** | Markdown viewer/preview in terminal |
-| **Spec linking** | Associate a spec with current work/branch |
-| **Split context** | Spec on left, implementation diff on right |
-| **Doc changes** | Highlight when AI modifies docs vs code |
-
-Questions to answer:
-- Where do docs live? (`docs/`, root, anywhere?)
-- How to identify "spec" docs vs other markdown?
-- Render markdown or show raw?
-- How does this connect to the diff workflow?
+Potential features:
+- **DocsList** - Window showing project docs (*.md files)
+- **DocsView** - Markdown viewer in terminal
+- **Spec linking** - Associate a spec with current work/branch
+- **Split context** - Spec on left, implementation diff on right
