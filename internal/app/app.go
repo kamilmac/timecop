@@ -174,6 +174,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.state.SetDiffMode(git.DiffModeBranch)
 			return a, tea.Batch(a.loadFiles(), a.loadDiff(), a.loadDiffStats())
 
+		case key.Matches(msg, keys.DefaultKeyMap.ToggleAllFiles):
+			a.state.ToggleAllFiles()
+			return a, a.loadFiles()
+
 		case key.Matches(msg, keys.DefaultKeyMap.Tab):
 			a.cycleFocus(false)
 			return a, nil
@@ -344,6 +348,9 @@ func (a *App) renderStatusBar() string {
 
 	// Mode
 	mode := fmt.Sprintf("[%s]", a.state.DiffMode.String())
+	if a.state.ShowAllFiles {
+		mode += " [all]"
+	}
 
 	// File count
 	fileCount := fmt.Sprintf("%d files", len(a.state.Files))
@@ -424,7 +431,15 @@ func (a *App) loadBranchInfo() tea.Cmd {
 
 func (a *App) loadFiles() tea.Cmd {
 	return func() tea.Msg {
-		files, err := a.git.Status(a.state.DiffMode)
+		var files []git.FileStatus
+		var err error
+
+		if a.state.ShowAllFiles {
+			files, err = a.git.ListAllFiles()
+		} else {
+			files, err = a.git.Status(a.state.DiffMode)
+		}
+
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -434,6 +449,19 @@ func (a *App) loadFiles() tea.Cmd {
 
 func (a *App) loadDiff() tea.Cmd {
 	return func() tea.Msg {
+		// Check if file is unchanged (in all-files mode)
+		if a.state.ShowAllFiles && a.state.SelectedIndex >= 0 && a.state.SelectedIndex < len(a.state.Files) {
+			file := a.state.Files[a.state.SelectedIndex]
+			if file.Status == git.StatusUnchanged {
+				// Show file content instead of diff
+				content, err := a.git.ReadFile(file.Path)
+				if err != nil {
+					return ErrorMsg{Err: err}
+				}
+				return DiffLoadedMsg{Content: content}
+			}
+		}
+
 		content, err := a.git.Diff(a.state.SelectedFile, a.state.DiffMode)
 		if err != nil {
 			return ErrorMsg{Err: err}

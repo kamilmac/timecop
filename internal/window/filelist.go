@@ -342,9 +342,9 @@ func (f *FileList) renderTreeLine(entry flatEntry, selected bool, maxWidth int) 
 	// Name
 	name := entry.display
 
-	// Status indicator (only for files)
+	// Status indicator (only for files with changes)
 	var statusStr string
-	if !entry.isDir {
+	if !entry.isDir && entry.status != git.StatusUnchanged {
 		var statusStyle lipgloss.Style
 		switch entry.status {
 		case git.StatusModified:
@@ -365,7 +365,7 @@ func (f *FileList) renderTreeLine(entry flatEntry, selected bool, maxWidth int) 
 	indentLen := len(indent)
 	prefixLen := 2 // "▼ " or "  "
 	statusLen := 0
-	if !entry.isDir {
+	if !entry.isDir && entry.status != git.StatusUnchanged {
 		statusLen = 3 // " M" or similar
 	}
 	cursorLen := 2 // "> " or "  "

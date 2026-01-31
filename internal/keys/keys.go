@@ -26,8 +26,9 @@ type KeyMap struct {
 	Help       key.Binding
 
 	// Mode switching
-	ModeWorking key.Binding
-	ModeBranch  key.Binding
+	ModeWorking    key.Binding
+	ModeBranch     key.Binding
+	ToggleAllFiles key.Binding
 
 	// Future
 	ToggleTree key.Binding
@@ -111,6 +112,10 @@ var DefaultKeyMap = KeyMap{
 		key.WithKeys("2"),
 		key.WithHelp("2", "branch mode"),
 	),
+	ToggleAllFiles: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "toggle all files"),
+	),
 	ToggleTree: key.NewBinding(
 		key.WithKeys("t"),
 		key.WithHelp("t", "toggle tree"),
@@ -133,5 +138,6 @@ func HelpBindings() []key.Binding {
 		DefaultKeyMap.Help,
 		DefaultKeyMap.ModeWorking,
 		DefaultKeyMap.ModeBranch,
+		DefaultKeyMap.ToggleAllFiles,
 	}
 }

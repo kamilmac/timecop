@@ -8,6 +8,7 @@ type State struct {
 	SelectedFile  string
 	SelectedIndex int
 	DiffMode      git.DiffMode
+	ShowAllFiles  bool // Show all files vs only changed files
 
 	// Data
 	Files       []git.FileStatus
@@ -47,6 +48,13 @@ func (s *State) SelectFile(index int) {
 // SetDiffMode changes the diff mode and resets selection
 func (s *State) SetDiffMode(mode git.DiffMode) {
 	s.DiffMode = mode
+	s.SelectedFile = ""
+	s.SelectedIndex = 0
+}
+
+// ToggleAllFiles toggles between showing all files and only changed files
+func (s *State) ToggleAllFiles() {
+	s.ShowAllFiles = !s.ShowAllFiles
 	s.SelectedFile = ""
 	s.SelectedIndex = 0
 }

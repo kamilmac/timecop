@@ -34,6 +34,7 @@ const (
 	StatusDeleted
 	StatusRenamed
 	StatusUntracked
+	StatusUnchanged
 )
 
 func (s Status) String() string {
@@ -48,6 +49,8 @@ func (s Status) String() string {
 		return "R"
 	case StatusUntracked:
 		return "?"
+	case StatusUnchanged:
+		return " "
 	default:
 		return " "
 	}
@@ -66,8 +69,14 @@ type Client interface {
 	// Status returns changed files based on the diff mode
 	Status(mode DiffMode) ([]FileStatus, error)
 
+	// ListAllFiles returns all tracked files with their git status
+	ListAllFiles() ([]FileStatus, error)
+
 	// Diff returns the diff for a file (or all files if path is empty)
 	Diff(path string, mode DiffMode) (string, error)
+
+	// ReadFile returns the content of a file
+	ReadFile(path string) (string, error)
 
 	// Log returns commits on current branch vs base
 	Log() ([]Commit, error)
