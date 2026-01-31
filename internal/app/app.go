@@ -247,7 +247,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case GitChangedMsg:
 		// File system changed, refresh data
-		return a, tea.Batch(a.loadFiles(), a.loadDiff(), a.loadCommits(), a.loadDiffStats())
+		return a, tea.Batch(a.loadBranchInfo(), a.loadFiles(), a.loadDiff(), a.loadCommits(), a.loadDiffStats())
 	}
 
 	return a, nil
