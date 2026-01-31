@@ -148,6 +148,47 @@ func (c *GitClient) ListAllFiles() ([]FileStatus, error) {
 	return files, nil
 }
 
+// ListDocFiles returns all markdown files with their git status
+func (c *GitClient) ListDocFiles() ([]FileStatus, error) {
+	// Get all tracked markdown files
+	cmd := exec.Command("git", "ls-files", "*.md", "**/*.md")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+
+	// Get current status for changed files
+	statusCmd := exec.Command("git", "status", "--porcelain")
+	statusOut, _ := statusCmd.Output()
+	changedFiles := make(map[string]Status)
+	for _, fs := range parseStatus(string(statusOut)) {
+		changedFiles[fs.Path] = fs.Status
+	}
+
+	// Build file list with status
+	var files []FileStatus
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+		status := StatusUnchanged
+		if s, ok := changedFiles[line]; ok {
+			status = s
+		}
+		files = append(files, FileStatus{Path: line, Status: status})
+	}
+
+	// Add untracked markdown files from status
+	for path, status := range changedFiles {
+		if status == StatusUntracked && strings.HasSuffix(path, ".md") {
+			files = append(files, FileStatus{Path: path, Status: status})
+		}
+	}
+
+	return files, nil
+}
+
 func parseStatus(output string) []FileStatus {
 	var files []FileStatus
 	lines := strings.Split(strings.TrimSpace(output), "\n")

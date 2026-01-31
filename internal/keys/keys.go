@@ -28,7 +28,9 @@ type KeyMap struct {
 	// Mode switching
 	ModeWorking     key.Binding
 	ModeBranch      key.Binding
-	ToggleAllFiles  key.Binding
+	ViewChanged     key.Binding
+	ViewAllFiles    key.Binding
+	ViewDocs        key.Binding
 	ToggleDiffStyle key.Binding
 
 	// Future
@@ -113,9 +115,17 @@ var DefaultKeyMap = KeyMap{
 		key.WithKeys("2"),
 		key.WithHelp("2", "branch mode"),
 	),
-	ToggleAllFiles: key.NewBinding(
+	ViewChanged: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "changed files"),
+	),
+	ViewAllFiles: key.NewBinding(
 		key.WithKeys("a"),
-		key.WithHelp("a", "toggle all files"),
+		key.WithHelp("a", "all files"),
+	),
+	ViewDocs: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "docs only"),
 	),
 	ToggleDiffStyle: key.NewBinding(
 		key.WithKeys("s"),
@@ -143,7 +153,9 @@ func HelpBindings() []key.Binding {
 		DefaultKeyMap.Help,
 		DefaultKeyMap.ModeWorking,
 		DefaultKeyMap.ModeBranch,
-		DefaultKeyMap.ToggleAllFiles,
+		DefaultKeyMap.ViewChanged,
+		DefaultKeyMap.ViewAllFiles,
+		DefaultKeyMap.ViewDocs,
 		DefaultKeyMap.ToggleDiffStyle,
 	}
 }

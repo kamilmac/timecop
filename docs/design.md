@@ -48,7 +48,8 @@ A lightweight TUI that serves as your primary interface when working with AI:
 
 ### Future
 - [ ] FileExplorer - full project tree navigation with expand/collapse
-- [ ] Docs integration - view/navigate markdown specs alongside code changes
+- [x] Docs mode - filter to markdown files only (`d` key)
+- [ ] Markdown rendering - render markdown with formatting
 - [x] Side-by-side diff view (`s` to toggle)
 - [ ] Hooks/events for integration with AI agents (Claude Code, Cursor, Aider, etc.)
 
@@ -97,10 +98,11 @@ Control what files are shown (independent of diff mode):
 
 | Mode | Key | Description |
 |------|-----|-------------|
-| Changed | default | Only files with changes |
+| Changed | `c` | Only files with changes (default) |
 | All | `a` | All tracked files in repository |
+| Docs | `d` | Markdown files only (*.md) |
 
-When viewing all files, selecting an unchanged file shows its full content instead of an empty diff.
+When viewing all files or docs, selecting an unchanged file shows its full content instead of an empty diff.
 
 ### Layouts
 
@@ -291,7 +293,9 @@ Side-by-side view:
 | `?` | Toggle help modal |
 | `1` | Working diff mode |
 | `2` | Branch diff mode |
-| `a` | Toggle all files view |
+| `c` | Show changed files |
+| `a` | Show all files |
+| `d` | Show docs (markdown) only |
 | `s` | Toggle side-by-side diff |
 
 ## CLI Arguments
@@ -423,7 +427,7 @@ type State struct {
     SelectedIndex int
     DiffMode      DiffMode      // Working or Branch
     DiffStyle     DiffStyle     // Unified or SideBySide
-    ShowAllFiles  bool          // Toggle for all files view
+    FileViewMode  FileViewMode  // Changed, All, or Docs
     Files         []FileStatus
     Diff          string
     Commits       []Commit

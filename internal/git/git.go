@@ -38,6 +38,28 @@ func (s DiffStyle) String() string {
 	}
 }
 
+// FileViewMode represents which files to display
+type FileViewMode int
+
+const (
+	FileViewChanged FileViewMode = iota // Only changed files
+	FileViewAll                         // All tracked files
+	FileViewDocs                        // Markdown files only
+)
+
+func (m FileViewMode) String() string {
+	switch m {
+	case FileViewChanged:
+		return ""
+	case FileViewAll:
+		return "all"
+	case FileViewDocs:
+		return "docs"
+	default:
+		return ""
+	}
+}
+
 // FileStatus represents a changed file and its status
 type FileStatus struct {
 	Path   string
@@ -90,6 +112,9 @@ type Client interface {
 
 	// ListAllFiles returns all tracked files with their git status
 	ListAllFiles() ([]FileStatus, error)
+
+	// ListDocFiles returns all markdown files with their git status
+	ListDocFiles() ([]FileStatus, error)
 
 	// Diff returns the diff for a file (or all files if path is empty)
 	Diff(path string, mode DiffMode) (string, error)

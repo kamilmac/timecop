@@ -42,6 +42,7 @@ func (d *DiffView) SetContent(content string) {
 	}
 }
 
+
 // SetStyle updates the diff display style
 func (d *DiffView) SetStyle(style git.DiffStyle) {
 	d.style = style

@@ -174,8 +174,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.state.SetDiffMode(git.DiffModeBranch)
 			return a, tea.Batch(a.loadFiles(), a.loadDiff(), a.loadDiffStats())
 
-		case key.Matches(msg, keys.DefaultKeyMap.ToggleAllFiles):
-			a.state.ToggleAllFiles()
+		case key.Matches(msg, keys.DefaultKeyMap.ViewChanged):
+			a.state.SetFileViewMode(git.FileViewChanged)
+			return a, a.loadFiles()
+
+		case key.Matches(msg, keys.DefaultKeyMap.ViewAllFiles):
+			a.state.SetFileViewMode(git.FileViewAll)
+			return a, a.loadFiles()
+
+		case key.Matches(msg, keys.DefaultKeyMap.ViewDocs):
+			a.state.SetFileViewMode(git.FileViewDocs)
 			return a, a.loadFiles()
 
 		case key.Matches(msg, keys.DefaultKeyMap.ToggleDiffStyle):
@@ -356,8 +364,8 @@ func (a *App) renderStatusBar() string {
 	if a.state.DiffStyle == git.DiffStyleSideBySide {
 		mode += " [split]"
 	}
-	if a.state.ShowAllFiles {
-		mode += " [all]"
+	if viewMode := a.state.FileViewMode.String(); viewMode != "" {
+		mode += fmt.Sprintf(" [%s]", viewMode)
 	}
 
 	// File count
@@ -442,9 +450,12 @@ func (a *App) loadFiles() tea.Cmd {
 		var files []git.FileStatus
 		var err error
 
-		if a.state.ShowAllFiles {
+		switch a.state.FileViewMode {
+		case git.FileViewAll:
 			files, err = a.git.ListAllFiles()
-		} else {
+		case git.FileViewDocs:
+			files, err = a.git.ListDocFiles()
+		default:
 			files, err = a.git.Status(a.state.DiffMode)
 		}
 
@@ -457,8 +468,8 @@ func (a *App) loadFiles() tea.Cmd {
 
 func (a *App) loadDiff() tea.Cmd {
 	return func() tea.Msg {
-		// Check if file is unchanged (in all-files mode)
-		if a.state.ShowAllFiles && a.state.SelectedIndex >= 0 && a.state.SelectedIndex < len(a.state.Files) {
+		// Check if file is unchanged (in all-files or docs mode)
+		if a.state.FileViewMode != git.FileViewChanged && a.state.SelectedIndex >= 0 && a.state.SelectedIndex < len(a.state.Files) {
 			file := a.state.Files[a.state.SelectedIndex]
 			if file.Status == git.StatusUnchanged {
 				// Show file content instead of diff
