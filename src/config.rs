@@ -22,6 +22,8 @@ impl Default for Config {
 pub struct Colors {
     pub added: Color,
     pub removed: Color,
+    pub added_bg: Color,
+    pub removed_bg: Color,
     pub modified: Color,
     pub renamed: Color,
     pub untracked: Color,
@@ -43,6 +45,8 @@ impl Default for Colors {
         Self {
             added: Color::Rgb(166, 227, 161),      // Green
             removed: Color::Rgb(243, 139, 168),    // Red
+            added_bg: Color::Rgb(30, 50, 40),      // Dark green tint
+            removed_bg: Color::Rgb(50, 30, 35),    // Dark red tint
             modified: Color::Rgb(250, 179, 135),   // Peach
             renamed: Color::Rgb(203, 166, 247),    // Mauve
             untracked: Color::Rgb(108, 112, 134),  // Overlay0

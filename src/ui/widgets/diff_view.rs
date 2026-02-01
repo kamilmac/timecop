@@ -49,6 +49,10 @@ pub struct DiffViewState {
     current_file: String,
     /// Syntax-highlighted lines for FileContent mode
     highlighted_lines: Vec<Vec<(String, Style)>>,
+    /// Syntax-highlighted lines for diff mode (left side, indexed by line number)
+    highlighted_left: std::collections::HashMap<usize, Vec<(String, Style)>>,
+    /// Syntax-highlighted lines for diff mode (right side, indexed by line number)
+    highlighted_right: std::collections::HashMap<usize, Vec<(String, Style)>>,
 }
 
 impl Default for DiffViewState {
@@ -61,6 +65,8 @@ impl Default for DiffViewState {
             pr: None,
             current_file: String::new(),
             highlighted_lines: Vec::new(),
+            highlighted_left: std::collections::HashMap::new(),
+            highlighted_right: std::collections::HashMap::new(),
         }
     }
 }
@@ -106,13 +112,67 @@ impl DiffViewState {
             _ => String::new(),
         };
 
-        // Highlight file content if highlighter provided
-        self.highlighted_lines = match (&content, highlighter) {
-            (PreviewContent::FileContent { path, content }, Some(h)) => {
-                h.highlight_file(content, path)
+        // Clear previous highlighting
+        self.highlighted_lines = Vec::new();
+        self.highlighted_left.clear();
+        self.highlighted_right.clear();
+
+        // Apply syntax highlighting based on content type
+        if let Some(h) = highlighter {
+            match &content {
+                PreviewContent::FileContent { path, content: text } => {
+                    self.highlighted_lines = h.highlight_file(text, path);
+                }
+                PreviewContent::FileDiff { path, content: diff_text } => {
+                    // Extract and highlight left (removed) and right (added/context) lines
+                    let (left_lines, right_lines) = extract_diff_sides(diff_text);
+
+                    // Highlight both sides
+                    let left_highlighted = h.highlight_file(&left_lines.join("\n"), path);
+                    let right_highlighted = h.highlight_file(&right_lines.join("\n"), path);
+
+                    // Build line number -> highlighted spans mapping
+                    // Track actual line numbers AND indices into highlighted arrays separately
+                    let mut left_line_num = 1usize;
+                    let mut right_line_num = 1usize;
+                    let mut left_idx = 0usize;
+                    let mut right_idx = 0usize;
+
+                    for line in diff_text.lines() {
+                        if line.starts_with("@@") {
+                            if let Some((l, r)) = parse_hunk_header(line) {
+                                left_line_num = l;
+                                right_line_num = r;
+                            }
+                        } else if line.starts_with('-') && !line.starts_with("---") {
+                            if let Some(hl) = left_highlighted.get(left_idx) {
+                                self.highlighted_left.insert(left_line_num, hl.clone());
+                            }
+                            left_line_num += 1;
+                            left_idx += 1;
+                        } else if line.starts_with('+') && !line.starts_with("+++") {
+                            if let Some(hl) = right_highlighted.get(right_idx) {
+                                self.highlighted_right.insert(right_line_num, hl.clone());
+                            }
+                            right_line_num += 1;
+                            right_idx += 1;
+                        } else if line.starts_with(' ') {
+                            if let Some(hl) = left_highlighted.get(left_idx) {
+                                self.highlighted_left.insert(left_line_num, hl.clone());
+                            }
+                            if let Some(hl) = right_highlighted.get(right_idx) {
+                                self.highlighted_right.insert(right_line_num, hl.clone());
+                            }
+                            left_line_num += 1;
+                            right_line_num += 1;
+                            left_idx += 1;
+                            right_idx += 1;
+                        }
+                    }
+                }
+                _ => {}
             }
-            _ => Vec::new(),
-        };
+        }
 
         self.content = content;
         self.cursor = 0;
@@ -373,6 +433,32 @@ fn parse_diff(content: &str) -> Vec<DiffLine> {
     lines
 }
 
+/// Extract left (original) and right (new) file content from a diff
+fn extract_diff_sides(diff: &str) -> (Vec<String>, Vec<String>) {
+    let mut left_lines = Vec::new();
+    let mut right_lines = Vec::new();
+
+    for line in diff.lines() {
+        if line.starts_with("@@") || line.starts_with("diff ") || line.starts_with("index ")
+            || line.starts_with("---") || line.starts_with("+++")
+            || line.starts_with("new file") || line.starts_with("deleted file")
+        {
+            continue;
+        }
+
+        if line.starts_with('-') {
+            left_lines.push(line[1..].to_string());
+        } else if line.starts_with('+') {
+            right_lines.push(line[1..].to_string());
+        } else if line.starts_with(' ') {
+            left_lines.push(line[1..].to_string());
+            right_lines.push(line[1..].to_string());
+        }
+    }
+
+    (left_lines, right_lines)
+}
+
 fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
     // Parse @@ -start,count +start,count @@
     let parts: Vec<&str> = line.split_whitespace().collect();
@@ -546,20 +632,33 @@ impl<'a> StatefulWidget for DiffView<'a> {
             .collect();
 
         let pane_width = ((inner.width as usize).saturating_sub(3)) / 2; // -3 for separator
-        let has_highlighting = !state.highlighted_lines.is_empty();
+        let has_file_highlighting = !state.highlighted_lines.is_empty();
+        let has_diff_highlighting = !state.highlighted_left.is_empty() || !state.highlighted_right.is_empty();
 
         for (i, (idx, diff_line)) in visible_lines.into_iter().enumerate() {
             let y = inner.y + i as u16;
             let is_cursor = self.focused && idx == state.cursor;
 
-            let line = if has_highlighting && diff_line.left_num.is_some() {
-                // Use syntax highlighting for file content
+            let line = if has_file_highlighting && diff_line.left_num.is_some() && diff_line.right_text.is_none() {
+                // Use syntax highlighting for file content (single column)
                 let line_idx = diff_line.left_num.unwrap().saturating_sub(1);
                 render_highlighted_line(
                     diff_line,
                     state.highlighted_lines.get(line_idx),
                     is_cursor,
                     self.colors,
+                )
+            } else if has_diff_highlighting && !diff_line.is_header {
+                // Use syntax highlighting for diff (side-by-side)
+                let left_hl = diff_line.left_num.and_then(|n| state.highlighted_left.get(&n));
+                let right_hl = diff_line.right_num.and_then(|n| state.highlighted_right.get(&n));
+                render_highlighted_diff_line(
+                    diff_line,
+                    left_hl,
+                    right_hl,
+                    is_cursor,
+                    self.colors,
+                    pane_width,
                 )
             } else {
                 render_diff_line(diff_line, is_cursor, self.colors, pane_width)
@@ -585,7 +684,7 @@ fn render_highlighted_line(
         .unwrap_or_else(|| " ".repeat(num_width));
 
     spans.push(Span::styled(num_str, colors.style_muted()));
-    spans.push(Span::styled(" │ ", colors.style_muted()));
+    spans.push(Span::styled(" ", colors.style_muted()));
 
     // Highlighted content or fallback to plain text
     if let Some(styled_spans) = highlighted {
@@ -610,6 +709,134 @@ fn render_highlighted_line(
     }
 
     Line::from(spans)
+}
+
+fn render_highlighted_diff_line(
+    diff_line: &DiffLine,
+    left_hl: Option<&Vec<(String, Style)>>,
+    right_hl: Option<&Vec<(String, Style)>>,
+    cursor: bool,
+    colors: &Colors,
+    pane_width: usize,
+) -> Line<'static> {
+    let mut spans = vec![];
+    let num_width = 4;
+    let content_width = pane_width.saturating_sub(num_width + 1);
+
+    // Determine background colors based on line type
+    let (left_bg, right_bg) = match diff_line.line_type {
+        LineType::Added => (None, Some(colors.added_bg)),
+        LineType::Removed => (Some(colors.removed_bg), None),
+        _ => (None, None),
+    };
+
+    // Left pane
+    let left_num_str = diff_line.left_num
+        .map(|n| format!("{:>width$}", n, width = num_width))
+        .unwrap_or_else(|| " ".repeat(num_width));
+
+    spans.push(Span::styled(left_num_str, colors.style_muted()));
+    spans.push(Span::styled(" ", colors.style_muted()));
+
+    // Left content with syntax highlighting
+    let left_content_spans = if let Some(hl) = left_hl {
+        build_highlighted_content(hl, content_width, left_bg, cursor)
+    } else {
+        let text = diff_line.left_text.as_deref().unwrap_or("");
+        let text = truncate_or_pad(&text.replace('\t', "    "), content_width);
+        let mut style = Style::default().fg(colors.text);
+        if let Some(bg) = left_bg {
+            style = style.bg(bg);
+        }
+        if cursor {
+            style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+        }
+        vec![Span::styled(text, style)]
+    };
+    spans.extend(left_content_spans);
+
+    // Separator
+    spans.push(Span::styled(" │ ", colors.style_muted()));
+
+    // Right pane
+    let right_num_str = diff_line.right_num
+        .map(|n| format!("{:>width$}", n, width = num_width))
+        .unwrap_or_else(|| " ".repeat(num_width));
+
+    spans.push(Span::styled(right_num_str, colors.style_muted()));
+    spans.push(Span::styled(" ", colors.style_muted()));
+
+    // Right content with syntax highlighting
+    let right_content_spans = if let Some(hl) = right_hl {
+        build_highlighted_content(hl, content_width, right_bg, cursor)
+    } else {
+        let text = diff_line.right_text.as_deref().unwrap_or("");
+        let text = truncate_or_pad(&text.replace('\t', "    "), content_width);
+        let mut style = Style::default().fg(colors.text);
+        if let Some(bg) = right_bg {
+            style = style.bg(bg);
+        }
+        if cursor {
+            style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+        }
+        vec![Span::styled(text, style)]
+    };
+    spans.extend(right_content_spans);
+
+    Line::from(spans)
+}
+
+fn build_highlighted_content(
+    hl: &[(String, Style)],
+    max_width: usize,
+    bg_color: Option<ratatui::style::Color>,
+    cursor: bool,
+) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let mut total_len = 0;
+
+    for (text, style) in hl {
+        let text = text.replace('\t', "    ");
+        let remaining = max_width.saturating_sub(total_len);
+        if remaining == 0 {
+            break;
+        }
+
+        let display_text = if text.chars().count() > remaining {
+            // Safe UTF-8 truncation using char boundaries
+            let truncated: String = text.chars().take(remaining.saturating_sub(1)).collect();
+            format!("{}…", truncated)
+        } else {
+            text.to_string()
+        };
+
+        total_len += display_text.chars().count();
+
+        let mut final_style = *style;
+        if let Some(bg) = bg_color {
+            final_style = final_style.bg(bg);
+        }
+        if cursor {
+            final_style = final_style.add_modifier(ratatui::style::Modifier::REVERSED);
+        }
+
+        spans.push(Span::styled(display_text, final_style));
+    }
+
+    // Pad to fill width
+    if total_len < max_width {
+        let padding = " ".repeat(max_width - total_len);
+        let mut pad_style = Style::default();
+        if let Some(bg) = bg_color {
+            pad_style = pad_style.bg(bg);
+        }
+        if cursor {
+            pad_style = pad_style.add_modifier(ratatui::style::Modifier::REVERSED);
+        }
+        spans.push(Span::styled(padding, pad_style));
+    }
+
+    spans
 }
 
 fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_width: usize) -> Line<'static> {
@@ -654,7 +881,7 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
         };
 
         spans.push(Span::styled(left_num_str, colors.style_muted()));
-        spans.push(Span::styled(" │ ", colors.style_muted()));
+        spans.push(Span::styled(" ", colors.style_muted()));
         spans.push(Span::styled(left_text, content_style));
         return Line::from(spans);
     }
@@ -674,7 +901,7 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
         _ => ratatui::style::Style::default().fg(colors.text),
     };
 
-    let content_width = pane_width.saturating_sub(num_width + 3); // -3 for " │ "
+    let content_width = pane_width.saturating_sub(num_width + 1); // -1 for " "
     let left_content = truncate_or_pad(&left_text, content_width);
 
     // Right pane
@@ -705,13 +932,13 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
         right_style
     };
 
-    // Build line: left_num │ left_content │ right_num │ right_content
+    // Build line: left_num  left_content │ right_num  right_content
     spans.push(Span::styled(left_num_str, colors.style_muted()));
-    spans.push(Span::styled(" │ ", colors.style_muted()));
+    spans.push(Span::styled(" ", colors.style_muted()));
     spans.push(Span::styled(left_content, left_style));
     spans.push(Span::styled(" │ ", colors.style_muted()));
     spans.push(Span::styled(right_num_str, colors.style_muted()));
-    spans.push(Span::styled(" │ ", colors.style_muted()));
+    spans.push(Span::styled(" ", colors.style_muted()));
     spans.push(Span::styled(right_content, right_style));
 
     Line::from(spans)

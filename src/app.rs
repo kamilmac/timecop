@@ -501,15 +501,17 @@ impl App {
                 self.diff_view_state.set_content_highlighted(content, &self.highlighter);
                 return;
             } else {
-                // Changed mode - diff
+                // Changed mode - diff with syntax highlighting
                 let diff = self
                     .git
                     .diff(&entry.path, self.mode.diff_mode())
                     .unwrap_or_default();
-                PreviewContent::FileDiff {
+                let content = PreviewContent::FileDiff {
                     path: entry.path.clone(),
                     content: diff,
-                }
+                };
+                self.diff_view_state.set_content_highlighted(content, &self.highlighter);
+                return;
             }
         } else {
             PreviewContent::Empty
