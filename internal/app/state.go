@@ -41,6 +41,7 @@ type State struct {
 func NewState() *State {
 	return &State{
 		DiffMode:      git.DiffModeBranch,
+		DiffStyle:     git.DiffStyleSideBySide,
 		FocusedWindow: config.WindowFileList,
 	}
 }
