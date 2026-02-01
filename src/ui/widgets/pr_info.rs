@@ -169,17 +169,26 @@ fn render_pr_lines(
     colors: &Colors,
     width: usize,
 ) -> (Line<'static>, Line<'static>) {
-    // Line 1: indicator #number @author days_ago
+    // Line 1: indicators #number @author days_ago
     let mut spans1 = vec![];
 
     // Current branch indicator
-    let indicator = if is_current_branch { "●" } else { " " };
-    let indicator_style = if is_current_branch {
+    let branch_indicator = if is_current_branch { "●" } else { " " };
+    let branch_style = if is_current_branch {
         colors.style_added()
     } else {
         colors.style_muted()
     };
-    spans1.push(Span::styled(indicator.to_string(), indicator_style));
+    spans1.push(Span::styled(branch_indicator.to_string(), branch_style));
+
+    // Review requested indicator
+    let review_indicator = if pr.review_requested { "◆" } else { " " };
+    let review_style = if pr.review_requested {
+        ratatui::style::Style::default().fg(ratatui::style::Color::Yellow)
+    } else {
+        colors.style_muted()
+    };
+    spans1.push(Span::styled(review_indicator.to_string(), review_style));
 
     // PR number
     let pr_num = format!("#{:<5}", pr.number);
@@ -205,7 +214,7 @@ fn render_pr_lines(
     // Days ago (right-aligned)
     let days_ago = days_ago_from_date(&pr.updated_at);
     let days_str = format!(" {}", days_ago);
-    let used = 1 + 7 + author_len; // indicator + #number + author
+    let used = 2 + 7 + author_len; // indicators (2) + #number + author
     let padding = width.saturating_sub(used + days_str.len());
     if padding > 0 {
         let pad_style = if selected {

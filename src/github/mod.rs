@@ -220,6 +220,7 @@ pub struct PrSummary {
     pub branch: String,
     pub updated_at: String,
     pub url: String,
+    pub review_requested: bool, // true if current user is requested reviewer
 }
 
 impl GitHubClient {
@@ -286,17 +287,34 @@ impl GitHubClient {
         Ok(Some(pr_info))
     }
 
+    /// Get current GitHub user login
+    fn get_current_user(&self) -> Option<String> {
+        let output = Command::new("gh")
+            .args(["api", "user", "--jq", ".login"])
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        } else {
+            None
+        }
+    }
+
     /// List open PRs for the current repo
     pub fn list_open_prs(&mut self) -> Result<Vec<PrSummary>> {
         if !self.is_available() {
             return Ok(Vec::new());
         }
 
+        // Get current user for review request check
+        let current_user = self.get_current_user();
+
         let output = Command::new("gh")
             .args([
                 "pr", "list",
                 "--state", "open",
-                "--json", "number,title,author,headRefName,updatedAt,url",
+                "--json", "number,title,author,headRefName,updatedAt,url,reviewRequests",
                 "--limit", "50",
             ])
             .output()
@@ -316,6 +334,8 @@ impl GitHubClient {
             #[serde(rename = "updatedAt")]
             updated_at: String,
             url: String,
+            #[serde(rename = "reviewRequests", default)]
+            review_requests: Vec<ReviewRequest>,
         }
 
         #[derive(Deserialize)]
@@ -323,16 +343,31 @@ impl GitHubClient {
             login: String,
         }
 
+        #[derive(Deserialize)]
+        struct ReviewRequest {
+            login: Option<String>,
+            name: Option<String>, // For team requests
+        }
+
         let prs: Vec<PrData> = serde_json::from_slice(&output.stdout)
             .unwrap_or_default();
 
-        Ok(prs.into_iter().map(|p| PrSummary {
-            number: p.number,
-            title: p.title,
-            author: p.author.login,
-            branch: p.head_ref_name,
-            updated_at: p.updated_at.split('T').next().unwrap_or("").to_string(),
-            url: p.url,
+        Ok(prs.into_iter().map(|p| {
+            let review_requested = current_user.as_ref().map(|user| {
+                p.review_requests.iter().any(|r| {
+                    r.login.as_ref() == Some(user)
+                })
+            }).unwrap_or(false);
+
+            PrSummary {
+                number: p.number,
+                title: p.title,
+                author: p.author.login,
+                branch: p.head_ref_name,
+                updated_at: p.updated_at.split('T').next().unwrap_or("").to_string(),
+                url: p.url,
+                review_requested,
+            }
         }).collect())
     }
 
