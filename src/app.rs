@@ -6,6 +6,8 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::config::Config;
@@ -57,6 +59,7 @@ pub struct App {
     pub config: Config,
     git: GitClient,
     github: GitHubClient,
+    repo_path: String,
 
     // State
     pub mode: AppMode,
@@ -70,8 +73,11 @@ pub struct App {
     pub files: Vec<StatusEntry>,
     pub commits: Vec<Commit>,
     pub diff_stats: DiffStats,
-    stats_loaded: bool,
+    stats_loading: bool,
+    stats_rx: Option<Receiver<DiffStats>>,
     pub pr: Option<PrInfo>,
+    pr_loading: bool,
+    pr_rx: Option<Receiver<Option<PrInfo>>>,
     last_pr_poll: Instant,
 
     // Widget states
@@ -93,6 +99,7 @@ impl App {
             config: Config::default(),
             git,
             github,
+            repo_path: path.to_string(),
             mode: AppMode::default(),
             focused: FocusedWindow::FileList,
             show_help: false,
@@ -102,8 +109,11 @@ impl App {
             files: vec![],
             commits: vec![],
             diff_stats: DiffStats::default(),
-            stats_loaded: false,
+            stats_loading: false,
+            stats_rx: None,
             pr: None,
+            pr_loading: false,
+            pr_rx: None,
             last_pr_poll: Instant::now(),
             file_list_state: FileListState::new(),
             commit_list_state: CommitListState::new(),
@@ -131,9 +141,11 @@ impl App {
         // Load commits
         self.commits = self.git.log(self.config.layout.max_commits)?;
 
-        // Diff stats loaded lazily via handle_tick() for faster startup
+        // Trigger async stats loading
         self.diff_stats = DiffStats::default();
-        self.stats_loaded = false;
+        if self.mode.is_changed_mode() && !self.stats_loading {
+            self.spawn_stats_loader();
+        }
 
         // Update widget states
         self.file_list_state.set_files(self.files.clone());
@@ -151,49 +163,106 @@ impl App {
         Ok(())
     }
 
-    /// Refresh PR info from GitHub
-    pub fn refresh_pr(&mut self) {
-        if !self.github.is_available() {
-            return;
-        }
+    /// Spawn background thread to load diff stats
+    fn spawn_stats_loader(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        self.stats_rx = Some(rx);
+        self.stats_loading = true;
 
-        if let Ok(Some(pr)) = self.github.get_pr_for_branch(&self.branch) {
-            // Update file comments indicator
-            let comments: HashMap<String, bool> = pr
-                .file_comments
-                .keys()
-                .map(|k| (k.clone(), true))
-                .collect();
-            self.file_list_state.set_comments(comments);
+        let path = self.repo_path.clone();
+        let mode = self.mode.diff_mode();
+        thread::spawn(move || {
+            if let Ok(git) = GitClient::open(&path) {
+                if let Ok(stats) = git.diff_stats(mode) {
+                    let _ = tx.send(stats);
+                }
+            }
+        });
+    }
 
-            // Update diff view with PR for inline comments
-            self.diff_view_state.set_pr(Some(pr.clone()));
+    /// Spawn background thread to load PR info
+    fn spawn_pr_loader(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        self.pr_rx = Some(rx);
+        self.pr_loading = true;
 
-            self.pr = Some(pr);
+        let branch = self.branch.clone();
 
-            // Update preview if showing commit
-            self.update_preview();
-        }
+        thread::spawn(move || {
+            let mut github = GitHubClient::new();
+            if github.is_available() {
+                if let Ok(pr) = github.get_pr_for_branch(&branch) {
+                    let _ = tx.send(pr);
+                }
+            }
+        });
+    }
 
-        self.last_pr_poll = Instant::now();
+    /// Apply PR info to state
+    fn apply_pr_info(&mut self, pr: PrInfo) {
+        // Update file comments indicator
+        let comments: HashMap<String, bool> = pr
+            .file_comments
+            .keys()
+            .map(|k| (k.clone(), true))
+            .collect();
+        self.file_list_state.set_comments(comments);
+
+        // Update diff view with PR for inline comments
+        self.diff_view_state.set_pr(Some(pr.clone()));
+
+        self.pr = Some(pr);
+
+        // Update preview if showing commit
+        self.update_preview();
     }
 
     /// Handle tick event - periodic updates
     pub fn handle_tick(&mut self) {
         const PR_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
-        // Load diff stats lazily (deferred from refresh for faster startup)
-        if self.mode.is_changed_mode() && !self.stats_loaded {
-            if let Ok(stats) = self.git.diff_stats(self.mode.diff_mode()) {
-                self.diff_stats = stats;
-                self.stats_loaded = true;
+        // Check for completed stats loading
+        if let Some(ref rx) = self.stats_rx {
+            match rx.try_recv() {
+                Ok(stats) => {
+                    self.diff_stats = stats;
+                    self.stats_loading = false;
+                    self.stats_rx = None;
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.stats_loading = false;
+                    self.stats_rx = None;
+                }
+                Err(TryRecvError::Empty) => {} // Still loading
             }
         }
 
-        // Load PR on first tick (deferred from startup) or on interval
-        let should_load = self.pr.is_none() || self.last_pr_poll.elapsed() >= PR_POLL_INTERVAL;
-        if should_load && self.github.is_available() {
-            self.refresh_pr();
+        // Check for completed PR loading
+        if let Some(ref rx) = self.pr_rx {
+            match rx.try_recv() {
+                Ok(Some(pr)) => {
+                    self.apply_pr_info(pr);
+                    self.pr_loading = false;
+                    self.pr_rx = None;
+                    self.last_pr_poll = Instant::now();
+                }
+                Ok(None) => {
+                    self.pr_loading = false;
+                    self.pr_rx = None;
+                    self.last_pr_poll = Instant::now();
+                }
+                Err(TryRecvError::Disconnected) => {
+                    self.pr_loading = false;
+                    self.pr_rx = None;
+                }
+                Err(TryRecvError::Empty) => {} // Still loading
+            }
+        }
+
+        // Trigger PR loading if needed
+        let should_load_pr = self.pr.is_none() || self.last_pr_poll.elapsed() >= PR_POLL_INTERVAL;
+        if should_load_pr && !self.pr_loading {
+            self.spawn_pr_loader();
         }
     }
 
