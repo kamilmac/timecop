@@ -26,11 +26,6 @@ impl GitClient {
         Ok(client)
     }
 
-    /// Check if this is a valid git repository
-    pub fn is_repo(&self) -> bool {
-        !self.repo.is_bare()
-    }
-
     /// Get the current branch name
     pub fn current_branch(&self) -> Result<String> {
         let head = self.repo.head().context("Failed to get HEAD")?;
@@ -39,11 +34,6 @@ impl GitClient {
             .unwrap_or("HEAD")
             .to_string();
         Ok(branch)
-    }
-
-    /// Get the base branch name
-    pub fn base_branch(&self) -> Option<&str> {
-        self.base_branch.as_deref()
     }
 
     /// Detect the base branch (main, master, etc.)
@@ -305,72 +295,6 @@ impl GitClient {
         let full_path = self.path.join(path);
         std::fs::read_to_string(&full_path)
             .with_context(|| format!("Failed to read file: {}", path))
-    }
-
-    /// Get recent commits
-    pub fn log(&self, max: usize) -> Result<Vec<Commit>> {
-        let mut revwalk = self.repo.revwalk()?;
-        revwalk.push_head()?;
-
-        let mut commits = Vec::new();
-        for oid in revwalk.take(max) {
-            let oid = oid?;
-            let commit = self.repo.find_commit(oid)?;
-
-            let author = commit.author();
-            let time = commit.time();
-            let datetime = chrono::DateTime::from_timestamp(time.seconds(), 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                .unwrap_or_default();
-
-            // Get commit body (message without subject line)
-            let body = commit.message()
-                .unwrap_or("")
-                .lines()
-                .skip(1)
-                .skip_while(|l| l.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n");
-
-            // Get diff stats (compare with parent)
-            let (files_changed, insertions, deletions) = self.commit_stats(&commit)
-                .unwrap_or((0, 0, 0));
-
-            commits.push(Commit {
-                hash: oid.to_string(),
-                short_hash: oid.to_string()[..7].to_string(),
-                author: author.name().unwrap_or("Unknown").to_string(),
-                date: datetime,
-                subject: commit.summary().unwrap_or("").to_string(),
-                body,
-                files_changed,
-                insertions,
-                deletions,
-            });
-        }
-
-        Ok(commits)
-    }
-
-    /// Get diff stats for a commit (files changed, insertions, deletions)
-    fn commit_stats(&self, commit: &git2::Commit) -> Result<(usize, usize, usize)> {
-        let tree = commit.tree()?;
-        let parent_tree = commit.parent(0)
-            .ok()
-            .and_then(|p| p.tree().ok());
-
-        let diff = self.repo.diff_tree_to_tree(
-            parent_tree.as_ref(),
-            Some(&tree),
-            None,
-        )?;
-
-        let stats = diff.stats()?;
-        Ok((
-            stats.files_changed(),
-            stats.insertions(),
-            stats.deletions(),
-        ))
     }
 
     /// Get diff statistics

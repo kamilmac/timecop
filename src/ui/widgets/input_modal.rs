@@ -32,15 +32,6 @@ impl ReviewAction {
     pub fn needs_body(&self) -> bool {
         !matches!(self, Self::Approve { .. })
     }
-
-    pub fn pr_number(&self) -> u64 {
-        match self {
-            Self::Approve { pr_number }
-            | Self::RequestChanges { pr_number }
-            | Self::Comment { pr_number }
-            | Self::LineComment { pr_number, .. } => *pr_number,
-        }
-    }
 }
 
 /// Input modal state

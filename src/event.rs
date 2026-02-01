@@ -13,14 +13,10 @@ use std::time::Duration;
 pub enum AppEvent {
     /// Terminal key press
     Key(KeyEvent),
-    /// Terminal resize
-    Resize(u16, u16),
     /// File system change detected
     FileChanged,
     /// Tick for periodic updates
     Tick,
-    /// PR data loaded
-    PrLoaded,
 }
 
 /// Event handler that runs in a separate thread
@@ -32,10 +28,6 @@ pub struct EventHandler {
 }
 
 impl EventHandler {
-    pub fn new(tick_rate: Duration) -> Self {
-        Self::with_watcher(tick_rate, None)
-    }
-
     pub fn with_git_watcher(tick_rate: Duration, git_dir: &Path) -> Self {
         let (tx, rx) = mpsc::channel();
         let event_tx = tx.clone();
@@ -60,14 +52,8 @@ impl EventHandler {
                     }
 
                     if let Ok(event) = event::read() {
-                        let app_event = match event {
-                            Event::Key(key) => Some(AppEvent::Key(key)),
-                            Event::Resize(w, h) => Some(AppEvent::Resize(w, h)),
-                            _ => None,
-                        };
-
-                        if let Some(e) = app_event {
-                            if event_tx.send(e).is_err() {
+                        if let Event::Key(key) = event {
+                            if event_tx.send(AppEvent::Key(key)).is_err() {
                                 break;
                             }
                         }
@@ -124,68 +110,9 @@ impl EventHandler {
         }
     }
 
-    fn with_watcher(tick_rate: Duration, watcher: Option<notify_debouncer_mini::Debouncer<RecommendedWatcher>>) -> Self {
-        let (tx, rx) = mpsc::channel();
-        let event_tx = tx.clone();
-        let paused = Arc::new(AtomicBool::new(false));
-        let paused_clone = paused.clone();
-
-        // Spawn event polling thread
-        thread::spawn(move || {
-            loop {
-                // Check if paused
-                if paused_clone.load(Ordering::Relaxed) {
-                    thread::sleep(Duration::from_millis(50));
-                    continue;
-                }
-
-                // Poll for events with timeout
-                if event::poll(tick_rate).unwrap_or(false) {
-                    // Double-check we're not paused before reading
-                    if paused_clone.load(Ordering::Relaxed) {
-                        continue;
-                    }
-
-                    if let Ok(event) = event::read() {
-                        let app_event = match event {
-                            Event::Key(key) => Some(AppEvent::Key(key)),
-                            Event::Resize(w, h) => Some(AppEvent::Resize(w, h)),
-                            _ => None,
-                        };
-
-                        if let Some(e) = app_event {
-                            if event_tx.send(e).is_err() {
-                                break;
-                            }
-                        }
-                    }
-                } else {
-                    // Send tick on timeout (only if not paused)
-                    if !paused_clone.load(Ordering::Relaxed) {
-                        if event_tx.send(AppEvent::Tick).is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        Self {
-            rx,
-            _tx: tx,
-            paused,
-            _watcher: watcher,
-        }
-    }
-
     /// Get the next event (blocking)
     pub fn next(&self) -> Result<AppEvent> {
         Ok(self.rx.recv()?)
-    }
-
-    /// Try to get the next event (non-blocking)
-    pub fn try_next(&self) -> Option<AppEvent> {
-        self.rx.try_recv().ok()
     }
 
     /// Pause event polling (for spawning external processes)
@@ -312,16 +239,8 @@ impl KeyInput {
         key.code == KeyCode::Char('o') && key.modifiers == KeyModifiers::NONE
     }
 
-    pub fn is_checkout(key: &KeyEvent) -> bool {
-        key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::NONE
-    }
-
     pub fn is_refresh(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char('r') && key.modifiers == KeyModifiers::NONE
-    }
-
-    pub fn is_pr_list(key: &KeyEvent) -> bool {
-        key.code == KeyCode::Char('p') && key.modifiers == KeyModifiers::NONE
     }
 
     pub fn is_approve(key: &KeyEvent) -> bool {

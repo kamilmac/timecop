@@ -108,20 +108,6 @@ impl fmt::Display for AppMode {
     }
 }
 
-/// A git commit
-#[derive(Debug, Clone)]
-pub struct Commit {
-    pub hash: String,
-    pub short_hash: String,
-    pub author: String,
-    pub date: String,
-    pub subject: String,
-    pub body: String,
-    pub files_changed: usize,
-    pub insertions: usize,
-    pub deletions: usize,
-}
-
 /// Diff statistics
 #[derive(Debug, Clone, Default)]
 pub struct DiffStats {

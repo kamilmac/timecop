@@ -1,5 +1,4 @@
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Span;
 use syntect::highlighting::{FontStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::easy::HighlightLines;
@@ -73,14 +72,6 @@ impl Highlighter {
         }
 
         result
-    }
-
-    /// Convert highlighted spans to ratatui Span objects
-    pub fn to_ratatui_spans(styled: &[(String, Style)]) -> Vec<Span<'static>> {
-        styled
-            .iter()
-            .map(|(text, style)| Span::styled(text.clone(), *style))
-            .collect()
     }
 }
 

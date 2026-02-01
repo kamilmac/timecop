@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use crate::async_loader::AsyncLoader;
 use crate::config::Config;
 use crate::event::KeyInput;
-use crate::git::{AppMode, Commit, DiffStats, GitClient, StatusEntry};
+use crate::git::{AppMode, DiffStats, GitClient, StatusEntry};
 use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
     centered_rect, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
@@ -44,10 +44,6 @@ impl FocusedWindow {
             Self::Preview => Self::PrList,
         }
     }
-
-    pub fn is_left_pane(self) -> bool {
-        matches!(self, Self::FileList | Self::PrList)
-    }
 }
 
 /// Command to execute after handling input
@@ -74,9 +70,7 @@ pub struct App {
 
     // Data
     pub branch: String,
-    pub base_branch: Option<String>,
     pub files: Vec<StatusEntry>,
-    pub commits: Vec<Commit>,
     pub diff_stats: DiffStats,
     pub selected_pr: Option<PrInfo>,
 
@@ -100,7 +94,6 @@ impl App {
         let github = GitHubClient::new();
 
         let branch = git.current_branch().unwrap_or_else(|_| "HEAD".to_string());
-        let base_branch = git.base_branch().map(String::from);
 
         let pr_poll_interval = Config::default().timing.pr_poll_interval;
         let mut app = Self {
@@ -114,9 +107,7 @@ impl App {
             show_help: false,
             pending_command: AppCommand::None,
             branch,
-            base_branch,
             files: vec![],
-            commits: vec![],
             diff_stats: DiffStats::default(),
             selected_pr: None,
             async_loader: AsyncLoader::new(),
@@ -148,9 +139,6 @@ impl App {
             AppMode::Docs => self.git.list_doc_files()?,
             _ => self.git.status(self.mode.diff_mode())?,
         };
-
-        // Load commits
-        self.commits = self.git.log(self.config.layout.max_commits)?;
 
         // Trigger async stats loading
         self.diff_stats = DiffStats::default();

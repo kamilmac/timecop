@@ -85,17 +85,11 @@ fn run_app<B: Backend + io::Write>(
             AppEvent::Key(key) => {
                 app.handle_key(key)?;
             }
-            AppEvent::Resize(_, _) => {
-                // Terminal will redraw automatically
-            }
             AppEvent::Tick => {
                 app.handle_tick();
             }
             AppEvent::FileChanged => {
                 app.refresh()?;
-            }
-            AppEvent::PrLoaded => {
-                // PR data updated
             }
         }
 

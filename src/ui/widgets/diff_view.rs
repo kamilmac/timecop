@@ -11,10 +11,9 @@ use crate::github::PrInfo;
 use crate::ui::Highlighter;
 
 use super::diff_parser::{
-    extract_diff_sides, is_binary, parse_commit_summary, parse_diff, parse_file_content,
+    extract_diff_sides, is_binary, parse_diff, parse_file_content,
     parse_hunk_header, parse_pr_details, truncate_or_pad, wrap_text, DiffLine, LineType,
 };
-use crate::git::Commit;
 
 /// What to show in the diff view
 #[derive(Debug, Clone)]
@@ -34,10 +33,6 @@ pub enum PreviewContent {
     FileContent {
         path: String,
         content: String,
-    },
-    CommitSummary {
-        commit: Commit,
-        pr: Option<PrInfo>,
     },
     PrDetails {
         pr: PrInfo,
@@ -218,9 +213,6 @@ impl DiffViewState {
                     parse_file_content(content)
                 }
             }
-            PreviewContent::CommitSummary { commit, pr } => {
-                parse_commit_summary(commit, pr.as_ref())
-            }
             PreviewContent::PrDetails { pr } => {
                 parse_pr_details(pr)
             }
@@ -312,9 +304,6 @@ impl DiffViewState {
             PreviewContent::FileDiff { path, .. } => path.clone(),
             PreviewContent::FolderDiff { path, .. } => format!("{}/", path),
             PreviewContent::FileContent { path, .. } => path.clone(),
-            PreviewContent::CommitSummary { commit, .. } => {
-                format!("{} {}", commit.short_hash, commit.subject)
-            }
             PreviewContent::PrDetails { pr } => {
                 format!("PR #{} {}", pr.number, pr.title)
             }
@@ -398,15 +387,6 @@ impl DiffViewState {
         }
         let percent = (self.offset * 100) / self.lines.len().saturating_sub(height.saturating_sub(2)).max(1);
         format!("{}%", percent.min(100))
-    }
-
-    pub fn yank_content(&self) -> Option<String> {
-        match &self.content {
-            PreviewContent::FileDiff { content, .. } => Some(content.clone()),
-            PreviewContent::FolderDiff { content, .. } => Some(content.clone()),
-            PreviewContent::FileContent { content, .. } => Some(content.clone()),
-            _ => None,
-        }
     }
 }
 

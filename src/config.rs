@@ -26,15 +26,11 @@ pub struct Colors {
     pub removed_bg: Color,
     pub modified: Color,
     pub renamed: Color,
-    pub untracked: Color,
     pub header: Color,
     pub muted: Color,
     pub text: Color,
-    pub surface: Color,
-    pub base: Color,
     pub border: Color,
     pub border_focused: Color,
-    pub cursor: Color,
     pub status_bar: Color,
     pub status_bar_text: Color,
     pub comment: Color,
@@ -50,15 +46,11 @@ impl Default for Colors {
             removed_bg: Color::Rgb(50, 30, 35),    // Dark red tint
             modified: Color::Rgb(250, 179, 135),   // Peach
             renamed: Color::Rgb(203, 166, 247),    // Mauve
-            untracked: Color::Rgb(108, 112, 134),  // Overlay0
             header: Color::Rgb(137, 180, 250),     // Blue
             muted: Color::Rgb(108, 112, 134),      // Overlay0
             text: Color::Rgb(205, 214, 244),       // Text
-            surface: Color::Rgb(49, 50, 68),       // Surface0
-            base: Color::Rgb(30, 30, 46),          // Base
             border: Color::Rgb(69, 71, 90),        // Surface1
             border_focused: Color::Rgb(137, 180, 250), // Blue
-            cursor: Color::Rgb(245, 224, 220),     // Rosewater
             status_bar: Color::Rgb(49, 50, 68),    // Surface0
             status_bar_text: Color::Rgb(205, 214, 244), // Text
             comment: Color::Rgb(249, 226, 175),   // Yellow for PR comments
@@ -92,10 +84,6 @@ impl Colors {
         Style::default().fg(self.text).add_modifier(Modifier::BOLD)
     }
 
-    pub fn style_cursor(&self) -> Style {
-        Style::default().add_modifier(Modifier::REVERSED)
-    }
-
     pub fn style_border(&self) -> Style {
         Style::default().fg(self.border)
     }
@@ -112,48 +100,26 @@ impl Colors {
 }
 
 pub struct Timing {
-    pub file_watcher_debounce: Duration,
     pub pr_poll_interval: Duration,
 }
 
 impl Default for Timing {
     fn default() -> Self {
         Self {
-            file_watcher_debounce: Duration::from_millis(500),
             pr_poll_interval: Duration::from_secs(300), // 5 minutes
         }
     }
 }
 
 pub struct Layout {
-    pub left_ratio: u16,
-    pub right_ratio: u16,
-    pub breakpoint: u16,
-    pub diff_pane_min_width: u16,
-    pub diff_line_num_width: usize,
-    pub diff_tab_width: usize,
-    pub max_commits: usize,
     /// In browse/docs mode, collapse folders at this depth and below (0 = root collapsed, 1 = first level collapsed)
     pub browse_collapse_depth: usize,
-    /// Width at which to wrap inline comments in diff view
-    pub comment_wrap_width: usize,
-    /// Separator width between left and right diff panes
-    pub diff_separator_width: usize,
 }
 
 impl Default for Layout {
     fn default() -> Self {
         Self {
-            left_ratio: 30,
-            right_ratio: 70,
-            breakpoint: 80,
-            diff_pane_min_width: 40,
-            diff_line_num_width: 4,
-            diff_tab_width: 4,
-            max_commits: 8,
             browse_collapse_depth: 2, // Collapse folders at depth 2+
-            comment_wrap_width: 120,
-            diff_separator_width: 3, // " │ "
         }
     }
 }

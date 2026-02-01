@@ -3,7 +3,6 @@
 //! This module contains functions for parsing various content types
 //! into displayable DiffLine structures.
 
-use crate::git::Commit;
 use crate::github::PrInfo;
 
 /// A parsed line ready for display in the diff view
@@ -193,111 +192,6 @@ fn make_header_line(text: String, line_type: LineType) -> DiffLine {
         line_type,
         is_header: true,
     }
-}
-
-/// Parse a commit summary into DiffLines
-pub fn parse_commit_summary(commit: &Commit, pr: Option<&PrInfo>) -> Vec<DiffLine> {
-    let mut lines = vec![];
-
-    // Commit info
-    lines.push(make_header_line("Commit".to_string(), LineType::Header));
-    lines.push(make_header_line("\u{2500}".repeat(40), LineType::Info));
-    lines.push(make_header_line(
-        format!("Hash:   {}", commit.hash),
-        LineType::Context,
-    ));
-    lines.push(make_header_line(
-        format!("Author: {}", commit.author),
-        LineType::Context,
-    ));
-    lines.push(make_header_line(
-        format!("Date:   {}", commit.date),
-        LineType::Context,
-    ));
-
-    // Stats
-    let stats_line = format!(
-        "Stats:  {} file{}, +{} -{}",
-        commit.files_changed,
-        if commit.files_changed == 1 { "" } else { "s" },
-        commit.insertions,
-        commit.deletions
-    );
-    lines.push(make_header_line(stats_line, LineType::Context));
-
-    lines.push(make_header_line(String::new(), LineType::Context));
-    lines.push(make_header_line(commit.subject.clone(), LineType::Info));
-
-    // Commit body if present
-    if !commit.body.is_empty() {
-        lines.push(make_header_line(String::new(), LineType::Context));
-        for line in commit.body.lines() {
-            lines.push(make_header_line(line.to_string(), LineType::Context));
-        }
-    }
-
-    lines.push(make_header_line(String::new(), LineType::Context));
-
-    // PR info
-    if let Some(pr) = pr {
-        lines.push(make_header_line(String::new(), LineType::Context));
-        lines.push(make_header_line("Pull Request".to_string(), LineType::Header));
-        lines.push(make_header_line("\u{2500}".repeat(40), LineType::Info));
-        lines.push(make_header_line(
-            format!("#{} {}", pr.number, pr.title),
-            LineType::Info,
-        ));
-        lines.push(make_header_line(
-            format!("State: {}", pr.state),
-            LineType::Context,
-        ));
-        lines.push(make_header_line(
-            format!("Author: {}", pr.author),
-            LineType::Context,
-        ));
-        lines.push(make_header_line(
-            format!("URL: {}", pr.url),
-            LineType::Context,
-        ));
-
-        if !pr.body.is_empty() {
-            lines.push(make_header_line(String::new(), LineType::Context));
-            lines.push(make_header_line("Description".to_string(), LineType::Header));
-            for line in pr.body.lines() {
-                lines.push(make_header_line(format!("  {}", line), LineType::Context));
-            }
-        }
-
-        // Reviews
-        if !pr.reviews.is_empty() {
-            lines.push(make_header_line(String::new(), LineType::Context));
-            lines.push(make_header_line("Reviews".to_string(), LineType::Header));
-            for review in &pr.reviews {
-                let line_type = match review.state.as_str() {
-                    "APPROVED" => LineType::Added,
-                    "CHANGES_REQUESTED" => LineType::Removed,
-                    _ => LineType::Context,
-                };
-                lines.push(make_header_line(
-                    format!("{} - {}", review.author, review.state),
-                    line_type,
-                ));
-                if !review.body.is_empty() {
-                    for line in review.body.lines() {
-                        lines.push(make_header_line(format!("  {}", line), LineType::Context));
-                    }
-                }
-            }
-        }
-    } else {
-        lines.push(make_header_line(String::new(), LineType::Context));
-        lines.push(make_header_line(
-            "No PR found for this branch".to_string(),
-            LineType::Info,
-        ));
-    }
-
-    lines
 }
 
 /// Parse PR details into DiffLines
