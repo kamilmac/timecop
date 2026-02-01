@@ -1,5 +1,5 @@
-# Binary
-kimchi
+# Build
+/target/
 
 # IDE
 .idea/
@@ -9,6 +9,3 @@ kimchi
 
 # OS
 .DS_Store
-
-# Test coverage
-coverage.out
