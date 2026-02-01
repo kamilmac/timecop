@@ -37,13 +37,17 @@ type DiffView struct {
 	// Line tracking for editor navigation
 	lineMap []lineLocation // maps rendered line index to file/line
 	cursor  int            // cursor position within viewport (0 = first visible line)
+
+	// PR summary renderer
+	prRenderer *PRSummaryRenderer
 }
 
 // NewDiffView creates a new diff view window
 func NewDiffView(styles ui.Styles) *DiffView {
 	return &DiffView{
-		Base:  NewBase("diffview", styles),
-		style: git.DiffStyleUnified,
+		Base:       NewBase("diffview", styles),
+		style:      git.DiffStyleUnified,
+		prRenderer: NewPRSummaryRenderer(styles),
 	}
 }
 
@@ -304,95 +308,7 @@ func (d *DiffView) getTitle() string {
 
 func (d *DiffView) renderPRSummary() string {
 	d.lineMap = nil // No line navigation for PR summary
-	var lines []string
-
-	if d.pr == nil {
-		lines = append(lines, d.styles.Muted.Render("No PR found for this branch"))
-		lines = append(lines, "")
-		lines = append(lines, d.styles.Muted.Render("Push your branch and create a PR to see summary here."))
-		return strings.Join(lines, "\n")
-	}
-
-	// PR Title
-	lines = append(lines, d.styles.ListItemSelected.Render(d.pr.Title))
-	lines = append(lines, "")
-
-	// PR metadata
-	lines = append(lines, fmt.Sprintf("%s %s  %s %s  %s %s",
-		d.styles.Muted.Render("Author:"),
-		d.pr.Author,
-		d.styles.Muted.Render("State:"),
-		d.pr.State,
-		d.styles.Muted.Render("#"),
-		fmt.Sprintf("%d", d.pr.Number),
-	))
-	lines = append(lines, d.styles.Muted.Render(d.pr.URL))
-	lines = append(lines, "")
-
-	// PR Description
-	if d.pr.Body != "" {
-		lines = append(lines, d.styles.DiffHeader.Render("Description"))
-		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
-		for _, line := range strings.Split(d.pr.Body, "\n") {
-			lines = append(lines, line)
-		}
-		lines = append(lines, "")
-	}
-
-	// Reviews
-	if len(d.pr.Reviews) > 0 {
-		lines = append(lines, d.styles.DiffHeader.Render("Reviews"))
-		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
-		for _, review := range d.pr.Reviews {
-			if review.State == "" && review.Body == "" {
-				continue
-			}
-			stateStyle := d.styles.Muted
-			switch review.State {
-			case "APPROVED":
-				stateStyle = d.styles.DiffAdded
-			case "CHANGES_REQUESTED":
-				stateStyle = d.styles.DiffRemoved
-			}
-			lines = append(lines, fmt.Sprintf("%s %s",
-				d.styles.Bold.Render(review.Author),
-				stateStyle.Render(review.State),
-			))
-			if review.Body != "" {
-				for _, line := range strings.Split(review.Body, "\n") {
-					lines = append(lines, "  "+line)
-				}
-			}
-			lines = append(lines, "")
-		}
-	}
-
-	// General comments (not attached to code)
-	if len(d.pr.Comments) > 0 {
-		lines = append(lines, d.styles.DiffHeader.Render("Comments"))
-		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
-		for _, comment := range d.pr.Comments {
-			lines = append(lines, d.styles.Bold.Render(comment.Author))
-			for _, line := range strings.Split(comment.Body, "\n") {
-				lines = append(lines, "  "+line)
-			}
-			lines = append(lines, "")
-		}
-	}
-
-	// Summary of files with comments
-	if len(d.pr.FileComments) > 0 {
-		lines = append(lines, d.styles.DiffHeader.Render("Files with inline comments"))
-		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
-		for path, comments := range d.pr.FileComments {
-			lines = append(lines, fmt.Sprintf("  %s %s",
-				path,
-				d.styles.Muted.Render(fmt.Sprintf("(%d)", len(comments))),
-			))
-		}
-	}
-
-	return strings.Join(lines, "\n")
+	return d.prRenderer.Render(d.pr)
 }
 
 func (d *DiffView) renderContent(content string) string {
