@@ -25,9 +25,9 @@ Current IDEs are built for humans writing code. In an AI workflow:
 A lightweight TUI that serves as your primary interface when working with AI:
 - **Changed files** - what did the AI touch?
 - **Diff view** - what exactly changed?
-- **Commit history** - what's been done on this branch?
+- **PR summary** - overview of the pull request
 - **All files** - browse the entire codebase
-- **Docs** - your specs alongside the implementation (future)
+- **Docs** - your specs alongside the implementation
 
 ## Features
 
@@ -36,22 +36,25 @@ A lightweight TUI that serves as your primary interface when working with AI:
 - [x] Tree view for file list with directories
 - [x] Show unified diff for selected file
 - [x] Vim-style navigation (`j`/`k`)
+- [x] Fast navigation (`J`/`K` - 5 lines at a time)
 - [x] Auto-refresh on file changes (500ms debounce via fsnotify)
 - [x] Syntax highlighting for diffs (+ green, - red)
 - [x] Status bar (branch, mode, file count, diff stats)
 - [x] Yank path (`y` to copy file path to clipboard)
 - [x] Open in editor (`o` to open in $EDITOR)
-- [x] CommitList window showing branch commits
 - [x] Help modal with keybindings
 - [x] All files mode (`a` to toggle) - view entire repo
+- [x] Docs mode (`d` to toggle) - filter to markdown files only
 - [x] File content viewer for unchanged files
+- [x] Side-by-side diff view (`s` to toggle)
+- [x] PR comments - inline comments in diff view, "C" indicator on files with comments
+- [x] Folder selection - select directories to view combined diff
+- [x] PR summary view - when root is selected, shows PR title, description, author
+- [x] Line selection in diff view - navigate to specific lines with cursor
 
 ### Future
 - [ ] FileExplorer - full project tree navigation with expand/collapse
-- [x] Docs mode - filter to markdown files only (`d` key)
 - [ ] Markdown rendering - render markdown with formatting
-- [x] Side-by-side diff view (`s` to toggle)
-- [x] PR comments - inline comments in diff view, "C" indicator on files with comments
 - [ ] Hooks/events for integration with AI agents (Claude Code, Cursor, Aider, etc.)
 
 ## Architecture
@@ -72,8 +75,7 @@ Windows implement a common interface. Layout doesn't care what type they are.
 | Window | Description |
 |--------|-------------|
 | `FileList` | Tree view of changed files with status indicators |
-| `DiffView` | Diff preview for selected file (or file content for unchanged files) |
-| `CommitList` | List of commits on current branch |
+| `DiffView` | Diff preview for selected file (or file content, PR summary, folder diff) |
 | `Help` | Keybinding reference (modal) |
 
 Each window:
@@ -110,27 +112,24 @@ When viewing all files or docs, selecting an unchanged file shows its full conte
 Layouts define slot structure. They don't know about window types.
 
 ```
-ThreeSlot (width >= 80)           StackedThree (width < 80)
-┌───────────┬───────────────┐     ┌─────────────────────────┐
-│  left-top │               │     │          top            │
-├───────────┤    right      │     ├─────────────────────────┤
-│left-bottom│               │     │         middle          │
-└───────────┴───────────────┘     ├─────────────────────────┤
-                                  │         bottom          │
-                                  └─────────────────────────┘
+TwoColumn (width >= 80)              Stacked (width < 80)
+┌───────────┬───────────────────┐    ┌─────────────────────────┐
+│           │                   │    │          top            │
+│   left    │      right        │    ├─────────────────────────┤
+│   (30%)   │      (70%)        │    │         bottom          │
+│           │                   │    │                         │
+└───────────┴───────────────────┘    └─────────────────────────┘
 ```
 
 Window assignments:
 ```go
 assignments := map[string]string{
-    // ThreeSlot layout
-    "left-top":    "filelist",
-    "left-bottom": "commitlist",
-    "right":       "diffview",
-    // StackedThree layout
+    // TwoColumn layout
+    "left":  "filelist",
+    "right": "diffview",
+    // Stacked layout
     "top":    "filelist",
-    "middle": "diffview",
-    "bottom": "commitlist",
+    "bottom": "diffview",
 }
 ```
 
@@ -139,34 +138,31 @@ assignments := map[string]string{
 Help window is displayed as a modal overlay, centered on screen.
 
 ```
-┌───────────┬───────────────┐
-│           │ ┌───────────┐ │
-│  slot1    │ │   Help    │ │
-├───────────┤ │  (modal)  │ │
-│  slot2    │ │           │ │
-│           │ └───────────┘ │
-└───────────┴───────────────┘
+┌───────────┬───────────────────┐
+│           │  ┌─────────────┐  │
+│  filelist │  │    Help     │  │
+│           │  │   (modal)   │  │
+│           │  │             │  │
+│           │  └─────────────┘  │
+└───────────┴───────────────────┘
 ```
 
 ## Default UI
 
 ```
-┌─────────────────────┬────────────────────────────────────┐
-│ Files (4)           │ Diff                               │
-│ ▼ src/              │ @@ -10,6 +10,8 @@                  │
-│   > main.go      M  │  func main() {                     │
-│     app.go       M  │ -    oldLine()                     │
-│ ▼ internal/         │ +    newLine()                     │
-│   ▼ git/            │ +    anotherLine()                 │
-│       git.go     A  │  }                                 │
-│   README.md      M  │                                    │
-├─────────────────────┤                                    │
-│ Commits (2)         │                                    │
-│ > abc123 Add feat...│                                    │
-│   def456 Fix bug... │                                    │
-├─────────────────────┴────────────────────────────────────┤
-│ feature/blocks  [branch]  4 files  +127 -43              │
-└──────────────────────────────────────────────────────────┘
+┌─────────────────────┬──────────────────────────────────────┐
+│ Files (4)           │ Diff                                 │
+│ ▼ src/              │  func main() {                       │
+│   > main.go      M  │ -    oldLine()                       │
+│     app.go       M  │ +    newLine()                       │
+│ ▼ internal/         │ +    anotherLine()                   │
+│   ▼ git/            │  }                                   │
+│       git.go     A  │                                      │
+│   README.md      M  │                                      │
+│                     │                                      │
+├─────────────────────┴──────────────────────────────────────┤
+│ feature/blocks  [branch]  4 files  +127 -43                │
+└────────────────────────────────────────────────────────────┘
 ```
 
 ## Status Bar
@@ -201,8 +197,9 @@ Files are displayed as a tree with directories:
   README.md           M
 ```
 - Directories shown with `▼` prefix in muted style
-- Navigation skips directory entries (cursor only on files)
-- `j`/`k` for up/down, `g`/`G` for top/bottom
+- Cursor can land on directories for folder selection
+- `j`/`k` for up/down, `J`/`K` for fast navigation (5 lines)
+- `g`/`G` for top/bottom
 
 ### Content by Mode
 
@@ -219,15 +216,26 @@ Files are displayed as a tree with directories:
 - `D` - Deleted (red)
 - `?` - Untracked (muted)
 - `R` - Renamed (purple)
+- `C` - Has PR comments (shown alongside status)
 - ` ` - Unchanged (no indicator, in all files mode)
 
 ## DiffView Window
+
+### Content Types
+
+The DiffView displays different content based on selection:
+
+| Selection | Content |
+|-----------|---------|
+| File with changes | Unified or side-by-side diff |
+| File without changes | File content with line numbers |
+| Folder | Combined diff of all changed files in folder |
+| Root (no selection) | PR summary (if PR exists) or empty state |
 
 ### Display Format
 
 Unified diff with syntax highlighting:
 ```
-@@ -10,6 +10,8 @@ func main()
  context line
 -removed line
 +added line
@@ -238,24 +246,26 @@ Unified diff with syntax highlighting:
 Colors:
 - Green (`#a6e3a1`) for additions (`+`)
 - Red (`#f38ba8`) for removals (`-`)
-- Cyan/Blue for `@@` headers
-- Muted for file metadata (`diff`, `index`, `---`, `+++`)
+- Muted for context lines
+
+Metadata lines (`@@`, `diff --git`, `index`, `---`, `+++`) are hidden by default.
+
+### Line Selection
+
+DiffView supports line-by-line navigation with a cursor:
+- Cursor highlights the current line
+- `j`/`k` moves cursor up/down one line
+- `J`/`K` moves cursor 5 lines (fast navigation)
+- `y` copies file path with current line number (`path/to/file.go:42`)
 
 ### Scrolling
 
-- `j`/`k`: scroll line by line
+- `j`/`k`: move cursor line by line
+- `J`/`K`: move cursor 5 lines (fast navigation)
 - `Ctrl+d`/`Ctrl+u`: half-page scroll
 - `g`/`G`: top/bottom
 
 Title shows scroll position (top/bot/percentage).
-
-### Content
-
-- File selected with changes → show diff
-- File selected without changes (all files mode) → show file content
-- No selection → empty state message
-
-Large diffs truncated at 10,000 lines with message.
 
 ### Display Styles
 
@@ -273,12 +283,23 @@ Side-by-side view:
 - Status bar shows `[split]` indicator when active
 - When viewing file content (no diff), shows line numbers on left
 
+### PR Summary
+
+When root folder is selected (or no file selected) and a PR exists for the current branch:
+- Displays PR title, description, author
+- Shows PR status (open, merged, closed)
+- Lists general PR comments (not attached to specific lines)
+
+Large diffs truncated at 10,000 lines with message.
+
 ## Keybindings
 
 | Key | Action |
 |-----|--------|
-| `j` / `↓` | Move down in list / scroll diff |
-| `k` / `↑` | Move up in list / scroll diff |
+| `j` / `↓` | Move down in list / move cursor in diff |
+| `k` / `↑` | Move up in list / move cursor in diff |
+| `J` | Fast down (5 lines) |
+| `K` | Fast up (5 lines) |
 | `h` / `l` | Switch focused window |
 | `Tab` / `Shift+Tab` | Cycle through windows |
 | `Ctrl+d` | Scroll diff half-page down |
@@ -289,7 +310,7 @@ Side-by-side view:
 | `Escape` | Close modal / unfocus |
 | `q` | Quit |
 | `r` | Refresh |
-| `y` | Yank (copy) file path to clipboard |
+| `y` | Yank (copy) file path to clipboard (with line number in diff view) |
 | `o` | Open file in $EDITOR |
 | `?` | Toggle help modal |
 | `1` | Working diff mode |
@@ -332,10 +353,25 @@ Changes trigger refresh after 500ms debounce.
 3. Try common names: `main`, `master`
 4. Try remotes: `origin/main`, `origin/master`
 
-### CommitList Content
-- On feature branch: `git log <base>..HEAD`
-- On base branch: `git log origin/<branch>..HEAD` (unpushed commits)
-- No remote: Recent 20 commits
+## GitHub Integration
+
+Blocks integrates with GitHub via the `gh` CLI for PR-related features:
+
+### PR Detection
+- Automatically detects if current branch has an open PR
+- Polls for updates every 60 seconds
+
+### PR Information
+When a PR exists, the following is available:
+- PR title and description
+- Author and status (open/merged/closed)
+- Review comments and inline comments
+- Comment authors and timestamps
+
+### Inline Comments
+- Files with PR comments show "C" indicator in file list
+- Comments displayed inline in diff view at the relevant lines
+- Comment threading supported
 
 ## Error States
 
@@ -346,6 +382,7 @@ Changes trigger refresh after 500ms debounce.
 | Git command fails | Show error, keep last good state |
 | Base branch not found | Fall back gracefully |
 | Large diffs | Truncate at 10,000 lines with message |
+| No `gh` CLI | PR features disabled gracefully |
 
 ## Technical Stack
 
@@ -354,6 +391,7 @@ Changes trigger refresh after 500ms debounce.
 - **Styling**: Lipgloss
 - **File Watching**: fsnotify
 - **Git Operations**: Shell out to git CLI
+- **GitHub Operations**: Shell out to gh CLI
 
 ## Project Structure
 
@@ -366,7 +404,7 @@ blocks/
 │   │   ├── state.go        # Shared state struct & transitions
 │   │   └── messages.go     # All message types
 │   ├── config/
-│   │   └── config.go       # Config structs & defaults
+│   │   └── config.go       # Centralized config: colors, styles, constants
 │   ├── layout/
 │   │   └── layout.go       # Layout definitions & rendering
 │   ├── window/
@@ -374,16 +412,15 @@ blocks/
 │   │   ├── base.go         # Common window functionality
 │   │   ├── filelist.go     # FileList with tree view
 │   │   ├── diffview.go     # DiffView with syntax highlighting
-│   │   ├── commitlist.go   # CommitList
+│   │   ├── prsummary.go    # PR summary renderer (extracted component)
 │   │   └── help.go         # Help modal
 │   ├── git/
 │   │   ├── git.go          # Types, interface, enums
 │   │   └── client.go       # GitClient implementation
+│   ├── github/
+│   │   └── github.go       # GitHub client for PR data
 │   ├── watcher/
 │   │   └── watcher.go      # File system watcher
-│   ├── ui/
-│   │   ├── styles.go       # Lipgloss styles
-│   │   └── colors.go       # Color palette
 │   └── keys/
 │       └── keys.go         # Keybinding definitions
 ├── docs/
@@ -408,6 +445,7 @@ type Window interface {
 type Client interface {
     Status(mode DiffMode) ([]FileStatus, error)
     ListAllFiles() ([]FileStatus, error)
+    ListDocFiles() ([]FileStatus, error)
     Diff(path string, mode DiffMode) (string, error)
     ReadFile(path string) (string, error)
     Log() ([]Commit, error)
@@ -415,6 +453,13 @@ type Client interface {
     CurrentBranch() (string, error)
     DiffStats(mode DiffMode) (added, removed int, err error)
     IsRepo() bool
+}
+
+// github/github.go
+type Client interface {
+    IsAvailable() bool
+    HasRemote() bool
+    GetPRForBranch() (*PRInfo, error)
 }
 ```
 
@@ -424,21 +469,33 @@ Centralized state with message-based updates (Elm architecture):
 
 ```go
 type State struct {
-    SelectedFile  string
-    SelectedIndex int
-    DiffMode      DiffMode      // Working or Branch
-    DiffStyle     DiffStyle     // Unified or SideBySide
-    FileViewMode  FileViewMode  // Changed, All, or Docs
-    Files         []FileStatus
-    Diff          string
-    Commits       []Commit
-    Branch        string
-    BaseBranch    string
-    DiffAdded     int
-    DiffRemoved   int
+    // Selection
+    SelectedFile   string
+    SelectedIndex  int
+    SelectedFolder string   // non-empty when folder selected
+    FolderChildren []string // file paths in selected folder
+    IsRootSelected bool     // true when root is selected (PR summary)
+    DiffMode       DiffMode
+    DiffStyle      DiffStyle
+    FileViewMode   FileViewMode
+
+    // Data
+    Files       []FileStatus
+    Diff        string
+    Branch      string
+    BaseBranch  string
+    DiffAdded   int
+    DiffRemoved int
+
+    // UI
     FocusedWindow string
     ActiveModal   string
-    Error         string
+
+    // PR data
+    PR *PRInfo
+
+    // Errors
+    Error string
 }
 ```
 
@@ -449,29 +506,64 @@ User Input → App.Update() → Global keys or delegate to window
     → State update → Re-render
 ```
 
-## Future: Folder Selection & PR Summary
+## Configuration
 
-Enable selecting folders in FileList to view aggregated content:
+All configuration is centralized in `internal/config/config.go`:
 
-- **Folder highlighting** - Allow cursor to land on directories, not just files
-- **Folder diff** - When folder selected, show combined diff of all changed files within
-- **Root folder = PR view** - When top-level (repo root) is selected:
-  - Show PR summary (title, description, author)
-  - Show PR reviews and general comments (not attached to specific lines)
-  - Show relevant commits for the PR
-- **Scope filtering** - Selecting a subfolder filters commits to those touching that path
+### Window/Modal Names
+```go
+const (
+    WindowFileList = "filelist"
+    WindowDiffView = "diffview"
+    WindowHelp     = "help"
+    ModalHelp      = "help"
+)
+```
 
-This transforms Blocks into a true PR review tool where you can:
-1. Start at repo root to see PR overview
-2. Drill into folders to scope review
-3. Select individual files for line-by-line review with inline comments
+### Timing
+```go
+const (
+    PRPollInterval      = 60 * time.Second
+    FileWatcherDebounce = 500 * time.Millisecond
+)
+```
+
+### Layout
+```go
+const (
+    LayoutLeftRatio  = 30  // percentage
+    LayoutRightRatio = 70
+    LayoutBreakpoint = 80  // columns
+)
+```
+
+### Diff View
+```go
+const (
+    DiffSideBySideMinWidth = 60
+    DiffMaxLines           = 10000
+    DiffTabWidth           = 4
+)
+```
+
+### Colors (Catppuccin Mocha)
+```go
+var DefaultColors = Colors{
+    Added:    "#a6e3a1",  // Green
+    Removed:  "#f38ba8",  // Red
+    Modified: "#fab387",  // Peach
+    Renamed:  "#cba6f7",  // Mauve
+    Header:   "#89b4fa",  // Blue
+    Muted:    "#6c7086",  // Overlay0
+    // ...
+}
+```
 
 ## Future: Docs Integration
 
 The workflow: write markdown specs → AI implements → review changes.
 
 Potential features:
-- **DocsList** - Window showing project docs (*.md files)
-- **DocsView** - Markdown viewer in terminal
+- **DocsView** - Markdown viewer in terminal with rendering
 - **Spec linking** - Associate a spec with current work/branch
 - **Split context** - Spec on left, implementation diff on right
