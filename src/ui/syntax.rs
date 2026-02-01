@@ -23,8 +23,21 @@ impl Highlighter {
     /// Highlight a file's content, returning styled lines
     pub fn highlight_file(&self, content: &str, path: &str) -> Vec<Vec<(String, Style)>> {
         let extension = path.rsplit('.').next().unwrap_or("");
+
+        // Map extensions to syntax names for better coverage
+        let mapped_ext = match extension {
+            "ts" | "tsx" | "mts" | "cts" => "js", // TypeScript -> JavaScript
+            "jsx" => "js",
+            "mjs" | "cjs" => "js",
+            "yml" => "yaml",
+            "md" => "markdown",
+            "dockerfile" => "Dockerfile",
+            ext => ext,
+        };
+
         let syntax = self.syntax_set
-            .find_syntax_by_extension(extension)
+            .find_syntax_by_extension(mapped_ext)
+            .or_else(|| self.syntax_set.find_syntax_by_extension(extension))
             .or_else(|| self.syntax_set.find_syntax_by_first_line(content.lines().next().unwrap_or("")))
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
 
