@@ -105,17 +105,19 @@ impl GitClient {
         Ok(entries)
     }
 
-    /// Get all changes compared to base branch
+    /// Get all changes compared to base branch (using merge-base like GitHub PRs)
     fn branch_status(&self) -> Result<Vec<StatusEntry>> {
         let base = match &self.base_branch {
             Some(b) => b,
             None => return self.working_status(),
         };
 
-        let base_commit = self.resolve_commit(base)?;
+        // Use merge-base to compare only changes since branch diverged
+        // This matches GitHub's PR diff behavior
+        let merge_base = self.merge_base_commit(base)?;
         let head_commit = self.repo.head()?.peel_to_commit()?;
 
-        let base_tree = base_commit.tree()?;
+        let base_tree = merge_base.tree()?;
         let head_tree = head_commit.tree()?;
 
         let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
@@ -231,8 +233,10 @@ impl GitClient {
             None => return self.working_diff(path),
         };
 
-        let base_commit = self.resolve_commit(base)?;
-        let base_tree = base_commit.tree()?;
+        // Use merge-base to compare only changes since branch diverged
+        // This matches GitHub's PR diff behavior
+        let merge_base = self.merge_base_commit(base)?;
+        let base_tree = merge_base.tree()?;
 
         let mut opts = DiffOptions::new();
         opts.pathspec(path);
@@ -380,8 +384,9 @@ impl GitClient {
                     Some(b) => b,
                     None => return Ok(DiffStats::default()),
                 };
-                let base_commit = self.resolve_commit(base)?;
-                let base_tree = base_commit.tree()?;
+                // Use merge-base for consistent behavior with branch_diff
+                let merge_base = self.merge_base_commit(base)?;
+                let base_tree = merge_base.tree()?;
                 self.repo.diff_tree_to_workdir(Some(&base_tree), None)?
             }
         };
@@ -397,6 +402,21 @@ impl GitClient {
         let obj = self.repo.revparse_single(refspec)?;
         obj.peel_to_commit()
             .context("Failed to resolve commit")
+    }
+
+    /// Find the merge-base (common ancestor) between HEAD and base branch
+    /// This matches how GitHub compares branches in PR views
+    fn merge_base_commit(&self, base: &str) -> Result<git2::Commit<'_>> {
+        let base_commit = self.resolve_commit(base)?;
+        let head_commit = self.repo.head()?.peel_to_commit()?;
+
+        let merge_base_oid = self.repo
+            .merge_base(head_commit.id(), base_commit.id())
+            .context("Failed to find merge-base")?;
+
+        self.repo
+            .find_commit(merge_base_oid)
+            .context("Failed to find merge-base commit")
     }
 
     /// Get the repository path
