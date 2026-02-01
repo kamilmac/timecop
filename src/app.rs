@@ -16,7 +16,8 @@ use crate::git::{AppMode, Commit, DiffStats, GitClient, StatusEntry};
 use crate::github::{GitHubClient, PrInfo, PrSummary};
 use crate::ui::{
     centered_rect, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
-    Highlighter, PrListPanel, PrListPanelState, PreviewContent,
+    Highlighter, InputModal, InputModalState, InputResult, PrListPanel, PrListPanelState,
+    PreviewContent, ReviewAction,
 };
 
 /// Which window is focused
@@ -94,6 +95,7 @@ pub struct App {
     pub file_list_state: FileListState,
     pub pr_list_panel_state: PrListPanelState,
     pub diff_view_state: DiffViewState,
+    pub input_modal_state: InputModalState,
 
     // Syntax highlighting
     highlighter: Highlighter,
@@ -134,6 +136,7 @@ impl App {
             file_list_state: FileListState::new(),
             pr_list_panel_state: PrListPanelState::new(),
             diff_view_state: DiffViewState::new(),
+            input_modal_state: InputModalState::new(),
             highlighter: Highlighter::new(),
         };
 
@@ -374,6 +377,18 @@ impl App {
 
     /// Handle key input
     pub fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        // Input modal takes highest priority
+        if self.input_modal_state.visible {
+            match self.input_modal_state.handle_key(key) {
+                InputResult::Submit => {
+                    self.submit_review_action()?;
+                }
+                InputResult::Cancelled => {}
+                InputResult::Continue => {}
+            }
+            return Ok(());
+        }
+
         // Help modal takes priority
         if self.show_help {
             if KeyInput::is_help(&key) || KeyInput::is_escape(&key) {
@@ -525,6 +540,28 @@ impl App {
     }
 
     fn handle_pr_list_panel_key(&mut self, key: &KeyEvent) -> Result<()> {
+        // Review actions
+        if KeyInput::is_approve(key) {
+            if let Some(pr) = self.pr_list_panel_state.selected() {
+                self.input_modal_state.show(ReviewAction::Approve { pr_number: pr.number });
+            }
+            return Ok(());
+        }
+
+        if KeyInput::is_request_changes(key) {
+            if let Some(pr) = self.pr_list_panel_state.selected() {
+                self.input_modal_state.show(ReviewAction::RequestChanges { pr_number: pr.number });
+            }
+            return Ok(());
+        }
+
+        if KeyInput::is_comment(key) {
+            if let Some(pr) = self.pr_list_panel_state.selected() {
+                self.input_modal_state.show(ReviewAction::Comment { pr_number: pr.number });
+            }
+            return Ok(());
+        }
+
         let selection_changed = if KeyInput::is_down(key) {
             self.pr_list_panel_state.move_down();
             true
@@ -577,6 +614,22 @@ impl App {
     }
 
     fn handle_preview_key(&mut self, key: &KeyEvent) -> Result<()> {
+        // Line comment on current line (only if we have a selected PR and are viewing a file diff)
+        if KeyInput::is_comment(key) {
+            if let (Some(pr_num), Some(path), Some(line)) = (
+                self.pr_list_panel_state.selected_number(),
+                self.diff_view_state.get_current_file().map(|s| s.to_string()),
+                self.diff_view_state.get_current_line_number(),
+            ) {
+                self.input_modal_state.show(ReviewAction::LineComment {
+                    pr_number: pr_num,
+                    path,
+                    line: line as u32,
+                });
+            }
+            return Ok(());
+        }
+
         if KeyInput::is_down(key) {
             self.diff_view_state.move_down();
         } else if KeyInput::is_up(key) {
@@ -730,6 +783,45 @@ impl App {
         std::mem::replace(&mut self.pending_command, AppCommand::None)
     }
 
+    /// Submit the review action from the input modal
+    fn submit_review_action(&mut self) -> Result<()> {
+        let Some(action) = self.input_modal_state.action.clone() else {
+            return Ok(());
+        };
+
+        let body = self.input_modal_state.take_input();
+
+        let result = match &action {
+            ReviewAction::Approve { pr_number } => {
+                self.github.approve_pr(*pr_number)
+            }
+            ReviewAction::RequestChanges { pr_number } => {
+                self.github.request_changes(*pr_number, &body)
+            }
+            ReviewAction::Comment { pr_number } => {
+                self.github.comment_pr(*pr_number, &body)
+            }
+            ReviewAction::LineComment { pr_number, path, line } => {
+                self.github.add_line_comment(*pr_number, path, *line, &body)
+            }
+        };
+
+        match result {
+            Ok(()) => {
+                self.input_modal_state.hide();
+                // Refresh PR details to show the new comment/review
+                if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
+                    self.spawn_pr_detail_loader(pr_num);
+                }
+            }
+            Err(e) => {
+                self.input_modal_state.set_error(format!("Error: {}", e));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Render the UI
     pub fn render(&mut self, frame: &mut Frame) {
         let area = frame.area();
@@ -765,6 +857,13 @@ impl App {
             let help_area = centered_rect(60, 80, area);
             let help = HelpModal::new(colors);
             frame.render_widget(help, help_area);
+        }
+
+        // Render input modal if open
+        if self.input_modal_state.visible {
+            let modal_area = centered_rect(60, 40, area);
+            let input_modal = InputModal::new(colors, &self.input_modal_state);
+            frame.render_widget(input_modal, modal_area);
         }
     }
 

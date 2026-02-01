@@ -323,4 +323,16 @@ impl KeyInput {
     pub fn is_pr_list(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char('p') && key.modifiers == KeyModifiers::NONE
     }
+
+    pub fn is_approve(key: &KeyEvent) -> bool {
+        key.code == KeyCode::Char('a') && key.modifiers == KeyModifiers::NONE
+    }
+
+    pub fn is_request_changes(key: &KeyEvent) -> bool {
+        key.code == KeyCode::Char('x') && key.modifiers == KeyModifiers::NONE
+    }
+
+    pub fn is_comment(key: &KeyEvent) -> bool {
+        key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::NONE
+    }
 }

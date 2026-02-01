@@ -356,6 +356,110 @@ impl GitHubClient {
             .context("Failed to open PR in browser")?;
         Ok(())
     }
+
+    /// Approve a PR
+    pub fn approve_pr(&self, pr_number: u64) -> Result<()> {
+        let output = Command::new("gh")
+            .args(["pr", "review", &pr_number.to_string(), "--approve"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .context("Failed to approve PR")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to approve PR: {}", stderr);
+        }
+        Ok(())
+    }
+
+    /// Request changes on a PR
+    pub fn request_changes(&self, pr_number: u64, body: &str) -> Result<()> {
+        let output = Command::new("gh")
+            .args(["pr", "review", &pr_number.to_string(), "--request-changes", "-b", body])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .context("Failed to request changes")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to request changes: {}", stderr);
+        }
+        Ok(())
+    }
+
+    /// Add a comment to a PR (general review comment)
+    pub fn comment_pr(&self, pr_number: u64, body: &str) -> Result<()> {
+        let output = Command::new("gh")
+            .args(["pr", "review", &pr_number.to_string(), "--comment", "-b", body])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .context("Failed to comment on PR")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to comment: {}", stderr);
+        }
+        Ok(())
+    }
+
+    /// Add a line comment to a PR
+    pub fn add_line_comment(&self, pr_number: u64, path: &str, line: u32, body: &str) -> Result<()> {
+        // Use gh api to create a review comment on a specific line
+        let output = Command::new("gh")
+            .args([
+                "api",
+                &format!("repos/{{owner}}/{{repo}}/pulls/{}/comments", pr_number),
+                "-f", &format!("body={}", body),
+                "-f", &format!("path={}", path),
+                "-f", "commit_id=$(gh pr view --json headRefOid -q .headRefOid)",
+                "-F", &format!("line={}", line),
+                "-f", "side=RIGHT",
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .context("Failed to add line comment")?;
+
+        if !output.status.success() {
+            // Try alternative: get commit SHA first, then post comment
+            let sha_output = Command::new("gh")
+                .args(["pr", "view", &pr_number.to_string(), "--json", "headRefOid", "-q", ".headRefOid"])
+                .output()
+                .context("Failed to get PR head SHA")?;
+
+            let commit_sha = String::from_utf8_lossy(&sha_output.stdout).trim().to_string();
+
+            let output2 = Command::new("gh")
+                .args([
+                    "api",
+                    "--method", "POST",
+                    &format!("repos/{{owner}}/{{repo}}/pulls/{}/comments", pr_number),
+                    "-f", &format!("body={}", body),
+                    "-f", &format!("path={}", path),
+                    "-f", &format!("commit_id={}", commit_sha),
+                    "-F", &format!("line={}", line),
+                    "-f", "side=RIGHT",
+                ])
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .output()
+                .context("Failed to add line comment")?;
+
+            if !output2.status.success() {
+                let stderr = String::from_utf8_lossy(&output2.stderr);
+                anyhow::bail!("Failed to add line comment: {}", stderr);
+            }
+        }
+        Ok(())
+    }
 }
 
 impl Default for GitHubClient {

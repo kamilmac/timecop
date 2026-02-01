@@ -389,6 +389,15 @@ impl DiffViewState {
         })
     }
 
+    /// Get the current file path being displayed
+    pub fn get_current_file(&self) -> Option<&str> {
+        match &self.content {
+            PreviewContent::FileDiff { path, .. } => Some(path),
+            PreviewContent::FileContent { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+
     pub fn ensure_visible(&mut self, height: usize) {
         let visible_height = height.saturating_sub(1);
         if self.cursor < self.offset {

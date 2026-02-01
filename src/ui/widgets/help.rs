@@ -61,6 +61,11 @@ impl<'a> Widget for HelpModal<'a> {
             format_binding("?", "Toggle help", self.colors),
             format_binding("q", "Quit", self.colors),
             Line::from(""),
+            Line::from(Span::styled("PR Review (when PR selected)", self.colors.style_header())),
+            format_binding("a", "Approve PR", self.colors),
+            format_binding("x", "Request changes", self.colors),
+            format_binding("c", "Comment on PR / line", self.colors),
+            Line::from(""),
             Line::from(Span::styled(
                 "? or Esc to close",
                 self.colors.style_muted(),
