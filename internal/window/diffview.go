@@ -17,14 +17,16 @@ import (
 // DiffView displays a diff
 type DiffView struct {
 	Base
-	viewport viewport.Model
-	content  string
-	filePath string
-	pr       *github.PRInfo
-	style    git.DiffStyle
-	ready    bool
-	width    int
-	height   int
+	viewport   viewport.Model
+	content    string
+	filePath   string
+	folderPath string // non-empty when showing folder diff
+	isRoot     bool   // true when showing PR summary
+	pr         *github.PRInfo
+	style      git.DiffStyle
+	ready      bool
+	width      int
+	height     int
 }
 
 // NewDiffView creates a new diff view window
@@ -39,6 +41,8 @@ func NewDiffView(styles ui.Styles) *DiffView {
 func (d *DiffView) SetContent(content string, filePath string) {
 	d.content = content
 	d.filePath = filePath
+	d.folderPath = ""
+	d.isRoot = false
 	if d.ready {
 		styled := d.renderContent(content)
 		d.viewport.SetContent(styled)
@@ -62,6 +66,26 @@ func (d *DiffView) SetPR(pr *github.PRInfo) {
 	// Re-render if we have content
 	if d.ready && d.content != "" {
 		d.viewport.SetContent(d.renderContent(d.content))
+	}
+}
+
+// SetFolderContent sets content for a folder or PR summary view
+func (d *DiffView) SetFolderContent(content string, folderPath string, isRoot bool, pr *github.PRInfo) {
+	d.content = content
+	d.filePath = ""
+	d.folderPath = folderPath
+	d.isRoot = isRoot
+	d.pr = pr
+
+	if d.ready {
+		var styled string
+		if isRoot {
+			styled = d.renderPRSummary()
+		} else {
+			styled = d.renderContent(content)
+		}
+		d.viewport.SetContent(styled)
+		d.viewport.GotoTop()
 	}
 }
 
@@ -121,21 +145,30 @@ func (d *DiffView) View(width, height int) string {
 	// Initialize or resize viewport
 	if !d.ready {
 		d.viewport = viewport.New(contentWidth, contentHeight-1) // -1 for title
-		d.viewport.SetContent(d.renderContent(d.content))
+		if d.isRoot {
+			d.viewport.SetContent(d.renderPRSummary())
+		} else {
+			d.viewport.SetContent(d.renderContent(d.content))
+		}
 		d.ready = true
 	} else if d.viewport.Width != contentWidth || d.viewport.Height != contentHeight-1 {
 		d.viewport.Width = contentWidth
 		d.viewport.Height = contentHeight - 1
-		// Re-render content when width changes (important for side-by-side)
-		d.viewport.SetContent(d.renderContent(d.content))
+		// Re-render content when width changes
+		if d.isRoot {
+			d.viewport.SetContent(d.renderPRSummary())
+		} else {
+			d.viewport.SetContent(d.renderContent(d.content))
+		}
 	}
 
 	// Build content
 	var lines []string
 
 	// Title with scroll position
-	titleText := "Diff"
-	if d.content != "" {
+	titleText := d.getTitle()
+	hasContent := d.content != "" || d.isRoot
+	if hasContent {
 		scrollPos := d.formatScrollPos()
 		padding := max(0, contentWidth-len(titleText)-len(scrollPos)-4)
 		titleText = fmt.Sprintf("%s %s %s",
@@ -149,7 +182,7 @@ func (d *DiffView) View(width, height int) string {
 	lines = append(lines, titleText)
 
 	// Viewport content
-	if d.content == "" {
+	if !hasContent {
 		emptyMsg := d.styles.Muted.Render("Select a file to view diff")
 		lines = append(lines, emptyMsg)
 		// Pad remaining lines
@@ -177,6 +210,98 @@ func (d *DiffView) formatScrollPos() string {
 		return "bot"
 	}
 	return fmt.Sprintf("%d%%", int(p))
+}
+
+func (d *DiffView) getTitle() string {
+	if d.isRoot {
+		return "PR Summary"
+	}
+	if d.folderPath != "" {
+		return d.folderPath + "/"
+	}
+	return "Diff"
+}
+
+func (d *DiffView) renderPRSummary() string {
+	var lines []string
+
+	if d.pr == nil {
+		lines = append(lines, d.styles.Muted.Render("No PR found for this branch"))
+		lines = append(lines, "")
+		lines = append(lines, d.styles.Muted.Render("Push your branch and create a PR to see summary here."))
+		return strings.Join(lines, "\n")
+	}
+
+	// PR Title
+	lines = append(lines, d.styles.ListItemSelected.Render(d.pr.Title))
+	lines = append(lines, "")
+
+	// PR metadata
+	lines = append(lines, fmt.Sprintf("%s %s  %s %s  %s %s",
+		d.styles.Muted.Render("Author:"),
+		d.pr.Author,
+		d.styles.Muted.Render("State:"),
+		d.pr.State,
+		d.styles.Muted.Render("#"),
+		fmt.Sprintf("%d", d.pr.Number),
+	))
+	lines = append(lines, d.styles.Muted.Render(d.pr.URL))
+	lines = append(lines, "")
+
+	// Reviews
+	if len(d.pr.Reviews) > 0 {
+		lines = append(lines, d.styles.DiffHeader.Render("Reviews"))
+		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
+		for _, review := range d.pr.Reviews {
+			if review.State == "" && review.Body == "" {
+				continue
+			}
+			stateStyle := d.styles.Muted
+			switch review.State {
+			case "APPROVED":
+				stateStyle = d.styles.DiffAdded
+			case "CHANGES_REQUESTED":
+				stateStyle = d.styles.DiffRemoved
+			}
+			lines = append(lines, fmt.Sprintf("%s %s",
+				d.styles.Bold.Render(review.Author),
+				stateStyle.Render(review.State),
+			))
+			if review.Body != "" {
+				for _, line := range strings.Split(review.Body, "\n") {
+					lines = append(lines, "  "+line)
+				}
+			}
+			lines = append(lines, "")
+		}
+	}
+
+	// General comments (not attached to code)
+	if len(d.pr.Comments) > 0 {
+		lines = append(lines, d.styles.DiffHeader.Render("Comments"))
+		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
+		for _, comment := range d.pr.Comments {
+			lines = append(lines, d.styles.Bold.Render(comment.Author))
+			for _, line := range strings.Split(comment.Body, "\n") {
+				lines = append(lines, "  "+line)
+			}
+			lines = append(lines, "")
+		}
+	}
+
+	// Summary of files with comments
+	if len(d.pr.FileComments) > 0 {
+		lines = append(lines, d.styles.DiffHeader.Render("Files with inline comments"))
+		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
+		for path, comments := range d.pr.FileComments {
+			lines = append(lines, fmt.Sprintf("  %s %s",
+				path,
+				d.styles.Muted.Render(fmt.Sprintf("(%d)", len(comments))),
+			))
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func (d *DiffView) renderContent(content string) string {

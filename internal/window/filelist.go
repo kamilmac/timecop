@@ -27,11 +27,13 @@ type treeNode struct {
 
 // flatEntry is a flattened tree entry for display/navigation
 type flatEntry struct {
-	display string
-	path    string // empty for directories
-	isDir   bool
-	depth   int
-	status  git.Status
+	display  string
+	path     string // full path (for files) or dir path (for folders)
+	isDir    bool
+	isRoot   bool // special root entry for PR summary
+	depth    int
+	status   git.Status
+	children []string // paths of child files (for directories)
 }
 
 // FileList displays a list of changed files
@@ -61,13 +63,17 @@ func (f *FileList) SetFiles(files []git.FileStatus) {
 	if f.cursor >= len(f.flatEntries) {
 		f.cursor = max(0, len(f.flatEntries)-1)
 	}
-	// Ensure cursor is on a file, not directory
-	f.skipToFile(1)
 }
 
 func (f *FileList) buildTree(files []git.FileStatus) []flatEntry {
 	if len(files) == 0 {
 		return nil
+	}
+
+	// Collect all file paths for root entry
+	allPaths := make([]string, len(files))
+	for i, file := range files {
+		allPaths[i] = file.Path
 	}
 
 	// Build tree structure
@@ -90,13 +96,15 @@ func (f *FileList) buildTree(files []git.FileStatus) []flatEntry {
 			}
 
 			if child == nil {
+				// Build path for this node
+				nodePath := strings.Join(parts[:i+1], string(filepath.Separator))
 				child = &treeNode{
 					name:  part,
+					path:  nodePath,
 					isDir: !isLast,
 					depth: i,
 				}
 				if isLast {
-					child.path = file.Path
 					child.status = file.Status
 				}
 				current.children = append(current.children, child)
@@ -108,9 +116,23 @@ func (f *FileList) buildTree(files []git.FileStatus) []flatEntry {
 	// Sort children at each level (dirs first, then alphabetically)
 	sortTree(root)
 
-	// Flatten tree for display
+	// Flatten tree for display - start with root entry
 	var entries []flatEntry
-	flattenTree(root, &entries, 0)
+
+	// Add root entry (represents whole repo / PR summary)
+	entries = append(entries, flatEntry{
+		display:  "./",
+		path:     "",
+		isDir:    true,
+		isRoot:   true,
+		depth:    0,
+		children: allPaths,
+	})
+
+	// Build directory children map
+	dirChildren := buildDirChildrenMap(files)
+
+	flattenTreeWithChildren(root, &entries, 0, dirChildren)
 
 	return entries
 }
@@ -143,24 +165,35 @@ func flattenTree(node *treeNode, entries *[]flatEntry, depth int) {
 	}
 }
 
-func (f *FileList) skipToFile(direction int) {
-	// Skip directory entries when navigating
-	for f.cursor >= 0 && f.cursor < len(f.flatEntries) && f.flatEntries[f.cursor].isDir {
-		f.cursor += direction
-	}
-	// Clamp
-	if f.cursor < 0 {
-		f.cursor = 0
-		// Find first file
-		for f.cursor < len(f.flatEntries) && f.flatEntries[f.cursor].isDir {
-			f.cursor++
+// buildDirChildrenMap creates a map of directory paths to their child file paths
+func buildDirChildrenMap(files []git.FileStatus) map[string][]string {
+	result := make(map[string][]string)
+	for _, file := range files {
+		parts := strings.Split(file.Path, string(filepath.Separator))
+		// Add to each parent directory
+		for i := 1; i <= len(parts)-1; i++ {
+			dirPath := strings.Join(parts[:i], string(filepath.Separator))
+			result[dirPath] = append(result[dirPath], file.Path)
 		}
 	}
-	if f.cursor >= len(f.flatEntries) {
-		f.cursor = len(f.flatEntries) - 1
-		// Find last file
-		for f.cursor >= 0 && f.flatEntries[f.cursor].isDir {
-			f.cursor--
+	return result
+}
+
+func flattenTreeWithChildren(node *treeNode, entries *[]flatEntry, depth int, dirChildren map[string][]string) {
+	for _, child := range node.children {
+		entry := flatEntry{
+			display: child.name,
+			path:    child.path,
+			isDir:   child.isDir,
+			depth:   depth,
+			status:  child.status,
+		}
+		if child.isDir {
+			entry.children = dirChildren[child.path]
+		}
+		*entries = append(*entries, entry)
+		if child.isDir {
+			flattenTreeWithChildren(child, entries, depth+1, dirChildren)
 		}
 	}
 }
@@ -176,6 +209,7 @@ func (f *FileList) SetPR(pr *github.PRInfo) {
 }
 
 // SelectedIndex returns the index of the selected file in the original files slice
+// Returns -1 for directories
 func (f *FileList) SelectedIndex() int {
 	if f.cursor < 0 || f.cursor >= len(f.flatEntries) {
 		return -1
@@ -193,12 +227,44 @@ func (f *FileList) SelectedIndex() int {
 	return -1
 }
 
-// SelectedPath returns the path of the currently selected file
+// SelectedPath returns the path of the currently selected item
 func (f *FileList) SelectedPath() string {
 	if f.cursor < 0 || f.cursor >= len(f.flatEntries) {
 		return ""
 	}
 	return f.flatEntries[f.cursor].path
+}
+
+// SelectedEntry returns the currently selected entry
+func (f *FileList) SelectedEntry() *flatEntry {
+	if f.cursor < 0 || f.cursor >= len(f.flatEntries) {
+		return nil
+	}
+	return &f.flatEntries[f.cursor]
+}
+
+// IsRootSelected returns true if the root entry is selected
+func (f *FileList) IsRootSelected() bool {
+	if f.cursor < 0 || f.cursor >= len(f.flatEntries) {
+		return false
+	}
+	return f.flatEntries[f.cursor].isRoot
+}
+
+// IsFolderSelected returns true if a folder (including root) is selected
+func (f *FileList) IsFolderSelected() bool {
+	if f.cursor < 0 || f.cursor >= len(f.flatEntries) {
+		return false
+	}
+	return f.flatEntries[f.cursor].isDir
+}
+
+// SelectedChildren returns the child file paths if a folder is selected
+func (f *FileList) SelectedChildren() []string {
+	if f.cursor < 0 || f.cursor >= len(f.flatEntries) {
+		return nil
+	}
+	return f.flatEntries[f.cursor].children
 }
 
 // SetSelectedIndex sets the cursor position
@@ -221,31 +287,21 @@ func (f *FileList) Update(msg tea.Msg) (Window, tea.Cmd) {
 		case key.Matches(msg, keys.DefaultKeyMap.Down):
 			if f.cursor < len(f.flatEntries)-1 {
 				f.cursor++
-				// Skip directories
-				for f.cursor < len(f.flatEntries)-1 && f.flatEntries[f.cursor].isDir {
-					f.cursor++
-				}
 				f.ensureVisible()
 				return f, f.selectCurrent()
 			}
 		case key.Matches(msg, keys.DefaultKeyMap.Up):
 			if f.cursor > 0 {
 				f.cursor--
-				// Skip directories
-				for f.cursor > 0 && f.flatEntries[f.cursor].isDir {
-					f.cursor--
-				}
 				f.ensureVisible()
 				return f, f.selectCurrent()
 			}
 		case key.Matches(msg, keys.DefaultKeyMap.GotoTop):
 			f.cursor = 0
-			f.skipToFile(1)
 			f.offset = 0
 			return f, f.selectCurrent()
 		case key.Matches(msg, keys.DefaultKeyMap.GotoBot):
 			f.cursor = max(0, len(f.flatEntries)-1)
-			f.skipToFile(-1)
 			f.ensureVisible()
 			return f, f.selectCurrent()
 		}
@@ -257,9 +313,7 @@ func (f *FileList) Update(msg tea.Msg) (Window, tea.Cmd) {
 func (f *FileList) selectCurrent() tea.Cmd {
 	if f.onSelect != nil && f.cursor >= 0 && f.cursor < len(f.flatEntries) {
 		entry := f.flatEntries[f.cursor]
-		if !entry.isDir {
-			return f.onSelect(f.SelectedIndex(), entry.path)
-		}
+		return f.onSelect(f.SelectedIndex(), entry.path)
 	}
 	return nil
 }
@@ -401,17 +455,17 @@ func (f *FileList) renderTreeLine(entry flatEntry, selected bool, maxWidth int) 
 
 	// Style based on selection and type
 	var nameStyle lipgloss.Style
-	if entry.isDir {
-		nameStyle = f.styles.Muted
-	} else if selected {
+	if selected {
 		nameStyle = f.styles.ListItemSelected
+	} else if entry.isDir {
+		nameStyle = f.styles.Muted
 	} else {
 		nameStyle = f.styles.ListItem
 	}
 
-	// Selection indicator (only for files)
+	// Selection indicator
 	cursor := " "
-	if selected && !entry.isDir {
+	if selected {
 		cursor = ">"
 	}
 

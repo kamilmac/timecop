@@ -83,3 +83,16 @@ type PRLoadedMsg struct {
 	PR  *github.PRInfo
 	Err error
 }
+
+// FolderSelectedMsg is sent when a folder is selected
+type FolderSelectedMsg struct {
+	Path     string   // folder path (empty for root)
+	IsRoot   bool     // true if root/PR summary view
+	Children []string // child file paths
+}
+
+// FolderDiffLoadedMsg is sent when a combined folder diff is loaded
+type FolderDiffLoadedMsg struct {
+	Content string
+	Path    string
+}

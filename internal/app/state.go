@@ -8,11 +8,14 @@ import (
 // State holds the shared application state
 type State struct {
 	// Selection
-	SelectedFile  string
-	SelectedIndex int
-	DiffMode      git.DiffMode
-	DiffStyle     git.DiffStyle
-	FileViewMode  git.FileViewMode
+	SelectedFile   string
+	SelectedIndex  int
+	SelectedFolder string   // non-empty when folder selected
+	FolderChildren []string // file paths in selected folder
+	IsRootSelected bool     // true when root is selected (PR summary)
+	DiffMode       git.DiffMode
+	DiffStyle      git.DiffStyle
+	FileViewMode   git.FileViewMode
 
 	// Data
 	Files       []git.FileStatus

@@ -101,6 +101,14 @@ func New(gitClient git.Client) *App {
 	// Set file selection callback
 	fileList.SetOnSelect(func(index int, path string) tea.Cmd {
 		return func() tea.Msg {
+			// Check if folder is selected
+			if fileList.IsFolderSelected() {
+				return FolderSelectedMsg{
+					Path:     path,
+					IsRoot:   fileList.IsRootSelected(),
+					Children: fileList.SelectedChildren(),
+				}
+			}
 			return FileSelectedMsg{Index: index, Path: path}
 		}
 	})
@@ -231,7 +239,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case FileSelectedMsg:
 		a.state.SelectFile(msg.Index)
+		a.state.SelectedFolder = ""
+		a.state.IsRootSelected = false
 		return a, a.loadDiff()
+
+	case FolderSelectedMsg:
+		a.state.SelectedFile = ""
+		a.state.SelectedIndex = -1
+		a.state.SelectedFolder = msg.Path
+		a.state.IsRootSelected = msg.IsRoot
+		a.state.FolderChildren = msg.Children
+		return a, a.loadFolderContent()
 
 	case FilesLoadedMsg:
 		a.state.SetFiles(msg.Files)
@@ -279,6 +297,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update windows with new PR data
 		a.fileList.SetPR(a.state.PR)
 		a.diffView.SetPR(a.state.PR)
+		return a, nil
+
+	case FolderDiffLoadedMsg:
+		a.state.Diff = msg.Content
+		a.diffView.SetFolderContent(msg.Content, msg.Path, a.state.IsRootSelected, a.state.PR)
 		return a, nil
 	}
 
@@ -539,5 +562,25 @@ func (a *App) loadPR() tea.Cmd {
 	return func() tea.Msg {
 		pr, err := a.gh.GetPRForBranch()
 		return PRLoadedMsg{PR: pr, Err: err}
+	}
+}
+
+func (a *App) loadFolderContent() tea.Cmd {
+	return func() tea.Msg {
+		if a.state.IsRootSelected {
+			// For root, we'll show PR summary - content is built by DiffView
+			return FolderDiffLoadedMsg{Content: "", Path: ""}
+		}
+
+		// For folders, combine diffs of all children
+		var combined strings.Builder
+		for _, path := range a.state.FolderChildren {
+			diff, err := a.git.Diff(path, a.state.DiffMode)
+			if err == nil && diff != "" {
+				combined.WriteString(diff)
+				combined.WriteString("\n")
+			}
+		}
+		return FolderDiffLoadedMsg{Content: combined.String(), Path: a.state.SelectedFolder}
 	}
 }
