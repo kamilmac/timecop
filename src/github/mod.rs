@@ -34,27 +34,30 @@ pub struct Comment {
 
 /// GitHub client using gh CLI
 pub struct GitHubClient {
-    available: bool,
+    available: Option<bool>,
 }
 
 impl GitHubClient {
     pub fn new() -> Self {
-        let available = Command::new("gh")
-            .arg("--version")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
-
-        Self { available }
+        // Lazy check - don't spawn process at startup
+        Self { available: None }
     }
 
-    pub fn is_available(&self) -> bool {
-        self.available
+    pub fn is_available(&mut self) -> bool {
+        if self.available.is_none() {
+            let result = Command::new("gh")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            self.available = Some(result);
+        }
+        self.available.unwrap_or(false)
     }
 
     /// Get PR info for the current branch
-    pub fn get_pr_for_branch(&self, branch: &str) -> Result<Option<PrInfo>> {
-        if !self.available {
+    pub fn get_pr_for_branch(&mut self, _branch: &str) -> Result<Option<PrInfo>> {
+        if !self.is_available() {
             return Ok(None);
         }
 

@@ -127,6 +127,8 @@ pub struct Layout {
     pub diff_line_num_width: usize,
     pub diff_tab_width: usize,
     pub max_commits: usize,
+    /// In browse/docs mode, collapse folders at this depth and below (0 = root collapsed, 1 = first level collapsed)
+    pub browse_collapse_depth: usize,
 }
 
 impl Default for Layout {
@@ -139,6 +141,7 @@ impl Default for Layout {
             diff_line_num_width: 4,
             diff_tab_width: 4,
             max_commits: 8,
+            browse_collapse_depth: 1, // Collapse folders at depth 1+
         }
     }
 }

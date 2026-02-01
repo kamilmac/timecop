@@ -45,6 +45,22 @@ impl FileListState {
         self.rebuild_tree();
     }
 
+    /// Collapse all directories at or below the given depth
+    pub fn collapse_at_depth(&mut self, depth: usize) {
+        self.collapsed.clear();
+        let dirs = collect_dirs(&self.files, depth);
+        for dir in dirs {
+            self.collapsed.insert(dir);
+        }
+        self.rebuild_tree();
+    }
+
+    /// Expand all directories
+    pub fn expand_all(&mut self) {
+        self.collapsed.clear();
+        self.rebuild_tree();
+    }
+
     pub fn set_comments(&mut self, comments: HashMap<String, bool>) {
         self.has_comments = comments;
         self.rebuild_tree();
@@ -283,6 +299,25 @@ fn flatten_tree(
             flatten_tree(&node.children, entries, depth + 1, collapsed, has_comments, files);
         }
     }
+}
+
+/// Collect all directory paths at or below a certain depth
+fn collect_dirs(files: &[StatusEntry], min_depth: usize) -> Vec<String> {
+    let mut dirs = std::collections::HashSet::new();
+
+    for file in files {
+        let parts: Vec<&str> = file.path.split('/').collect();
+        // Collect all parent directories
+        for i in 0..parts.len().saturating_sub(1) {
+            let depth = i + 1; // depth 1 is first level
+            if depth >= min_depth {
+                let dir_path = parts[..=i].join("/");
+                dirs.insert(dir_path);
+            }
+        }
+    }
+
+    dirs.into_iter().collect()
 }
 
 /// File list widget

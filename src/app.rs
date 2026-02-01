@@ -140,12 +140,10 @@ impl App {
         self.file_list_state.set_files(self.files.clone());
         self.commit_list_state.set_commits(self.commits.clone());
 
-        // Load PR info if available (on initial load or branch change)
-        if self.github.is_available() && (self.pr.is_none() || branch_changed) {
-            if branch_changed {
-                self.pr = None; // Clear old PR data
-            }
-            self.refresh_pr();
+        // PR info is loaded asynchronously via handle_tick(), not during refresh
+        // Clear PR data on branch change so it gets reloaded
+        if branch_changed {
+            self.pr = None;
         }
 
         // Update preview
@@ -185,8 +183,30 @@ impl App {
     pub fn handle_tick(&mut self) {
         const PR_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
-        if self.last_pr_poll.elapsed() >= PR_POLL_INTERVAL {
+        // Load PR on first tick (deferred from startup) or on interval
+        let should_load = self.pr.is_none() || self.last_pr_poll.elapsed() >= PR_POLL_INTERVAL;
+        if should_load && self.github.is_available() {
             self.refresh_pr();
+        }
+    }
+
+    /// Apply default settings when switching modes
+    fn apply_mode_defaults(&mut self, old_mode: AppMode) {
+        let entering_browse = (self.mode == AppMode::Browse || self.mode == AppMode::Docs)
+            && old_mode != AppMode::Browse
+            && old_mode != AppMode::Docs;
+
+        let leaving_browse = (old_mode == AppMode::Browse || old_mode == AppMode::Docs)
+            && self.mode != AppMode::Browse
+            && self.mode != AppMode::Docs;
+
+        if entering_browse {
+            // Collapse folders at configured depth
+            let depth = self.config.layout.browse_collapse_depth;
+            self.file_list_state.collapse_at_depth(depth);
+        } else if leaving_browse {
+            // Expand all when leaving browse mode
+            self.file_list_state.expand_all();
         }
     }
 
@@ -229,15 +249,19 @@ impl App {
         }
 
         if KeyInput::is_mode_cycle(&key) {
+            let old_mode = self.mode;
             self.mode = self.mode.next();
             self.refresh()?;
+            self.apply_mode_defaults(old_mode);
             return Ok(());
         }
 
         if let Some(n) = KeyInput::get_mode_number(&key) {
             if let Some(mode) = AppMode::from_number(n) {
+                let old_mode = self.mode;
                 self.mode = mode;
                 self.refresh()?;
+                self.apply_mode_defaults(old_mode);
             }
             return Ok(());
         }
