@@ -24,7 +24,7 @@ import (
 type App struct {
 	state  *State
 	git    git.Client
-	gh     *github.Client
+	gh     github.Client
 	layout *layout.Manager
 	styles ui.Styles
 

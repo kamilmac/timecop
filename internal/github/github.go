@@ -55,28 +55,35 @@ type LineComment struct {
 	Line   int
 }
 
-// Client wraps the gh CLI
-type Client struct{}
+// Client defines the interface for GitHub operations
+type Client interface {
+	IsAvailable() bool
+	HasRemote() bool
+	GetPRForBranch() (*PRInfo, error)
+}
 
-// NewClient creates a new GitHub client
-func NewClient() *Client {
-	return &Client{}
+// CLIClient wraps the gh CLI
+type CLIClient struct{}
+
+// NewClient creates a new GitHub client using the gh CLI
+func NewClient() Client {
+	return &CLIClient{}
 }
 
 // IsAvailable checks if gh CLI is available and authenticated
-func (c *Client) IsAvailable() bool {
+func (c *CLIClient) IsAvailable() bool {
 	cmd := exec.Command("gh", "auth", "status")
 	return cmd.Run() == nil
 }
 
 // HasRemote checks if the repo has a GitHub remote
-func (c *Client) HasRemote() bool {
+func (c *CLIClient) HasRemote() bool {
 	cmd := exec.Command("gh", "repo", "view", "--json", "name")
 	return cmd.Run() == nil
 }
 
 // GetPRForBranch gets PR info for the current branch
-func (c *Client) GetPRForBranch() (*PRInfo, error) {
+func (c *CLIClient) GetPRForBranch() (*PRInfo, error) {
 	cmd := exec.Command("gh", "pr", "view", "--json",
 		"number,title,body,state,url,author,createdAt,comments,reviews")
 	out, err := cmd.Output()
@@ -153,7 +160,7 @@ func (c *Client) GetPRForBranch() (*PRInfo, error) {
 }
 
 // getReviewComments fetches line-level review comments for a PR
-func (c *Client) getReviewComments(prNumber int) ([]ReviewComment, error) {
+func (c *CLIClient) getReviewComments(prNumber int) ([]ReviewComment, error) {
 	cmd := exec.Command("gh", "api",
 		fmt.Sprintf("repos/{owner}/{repo}/pulls/%d/comments", prNumber),
 		"--jq", `.[] | {author: .user.login, body: .body, path: .path, line: .line, side: .side, createdAt: .created_at}`)
