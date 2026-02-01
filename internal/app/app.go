@@ -401,6 +401,14 @@ func (a *App) cycleFocus(reverse bool) {
 	windowOrder := []string{config.WindowFileList, config.WindowCommitList, previewWindow}
 	a.state.CycleWindow(windowOrder, reverse)
 	a.updateFocus()
+
+	// Show PR summary when commit window gets focus
+	if a.state.FocusedWindow == config.WindowCommitList {
+		a.state.SelectedFile = ""
+		a.state.SelectedFolder = ""
+		a.state.IsRootSelected = true
+		a.diffView.SetFolderContent("", "", true, a.state.PR)
+	}
 }
 
 func (a *App) updateFocus() {
