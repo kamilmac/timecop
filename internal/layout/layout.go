@@ -43,42 +43,12 @@ var (
 		},
 	}
 
-	ThreeSlot = Layout{
-		Name:      "three-slot",
-		Direction: Horizontal,
-		Ratios:    []int{30, 70},
-		Slots: []Slot{
-			{
-				Name:      "left",
-				Direction: Vertical,
-				Ratios:    []int{60, 40},
-				Children: []Slot{
-					{Name: "left-top"},
-					{Name: "left-bottom"},
-				},
-			},
-			{Name: "right"},
-		},
-	}
-
 	Stacked = Layout{
 		Name:      "stacked",
 		Direction: Vertical,
 		Ratios:    []int{30, 70},
 		Slots: []Slot{
 			{Name: "top"},
-			{Name: "bottom"},
-		},
-	}
-
-	// StackedThree is a vertical layout with three windows
-	StackedThree = Layout{
-		Name:      "stacked-three",
-		Direction: Vertical,
-		Ratios:    []int{25, 50, 25},
-		Slots: []Slot{
-			{Name: "top"},
-			{Name: "middle"},
 			{Name: "bottom"},
 		},
 	}

@@ -34,9 +34,6 @@ type KeyMap struct {
 	ViewAllFiles    key.Binding
 	ViewDocs        key.Binding
 	ToggleDiffStyle key.Binding
-
-	// Future
-	ToggleTree key.Binding
 }
 
 // DefaultKeyMap returns the default keybindings
@@ -140,10 +137,6 @@ var DefaultKeyMap = KeyMap{
 	ToggleDiffStyle: key.NewBinding(
 		key.WithKeys("s"),
 		key.WithHelp("s", "split diff"),
-	),
-	ToggleTree: key.NewBinding(
-		key.WithKeys("t"),
-		key.WithHelp("t", "toggle tree"),
 	),
 }
 

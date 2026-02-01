@@ -11,11 +11,6 @@ type FileSelectedMsg struct {
 	Path  string
 }
 
-// DiffModeChangedMsg is sent when the diff mode changes
-type DiffModeChangedMsg struct {
-	Mode git.DiffMode
-}
-
 // FilesLoadedMsg is sent when files are loaded from git
 type FilesLoadedMsg struct {
 	Files []git.FileStatus
