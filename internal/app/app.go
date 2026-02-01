@@ -142,6 +142,7 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.loadBranchInfo(),
 		a.loadFiles(),
+		a.loadDiffStats(),
 		a.loadPR(),
 		a.schedulePRPoll(),
 	)
@@ -446,14 +447,11 @@ func (a *App) renderStatusBar() string {
 		branch = "unknown"
 	}
 
-	// Mode
-	mode := fmt.Sprintf("[%s]", a.state.DiffMode.String())
-	if a.state.DiffStyle == git.DiffStyleSideBySide {
-		mode += " [split]"
-	}
-	if viewMode := a.state.FileViewMode.String(); viewMode != "" {
-		mode += fmt.Sprintf(" [%s]", viewMode)
-	}
+	// Modes - always show all active modes
+	diffMode := fmt.Sprintf("[%s]", a.state.DiffMode.String())
+	diffStyle := fmt.Sprintf("[%s]", a.state.DiffStyle.String())
+	viewMode := fmt.Sprintf("[%s]", a.state.FileViewMode.String())
+	modes := diffMode + " " + diffStyle + " " + viewMode
 
 	// File count
 	fileCount := fmt.Sprintf("%d files", len(a.state.Files))
@@ -469,6 +467,33 @@ func (a *App) renderStatusBar() string {
 		)
 	}
 
+	// PR info
+	prInfo := ""
+	if a.state.PR != nil {
+		// Comment count
+		commentCount := len(a.state.PR.Comments) + len(a.state.PR.ReviewComments)
+		if commentCount > 0 {
+			prInfo = fmt.Sprintf("%d💬", commentCount)
+		}
+
+		// Review state - find the most relevant review
+		reviewState := ""
+		for _, r := range a.state.PR.Reviews {
+			switch r.State {
+			case "APPROVED":
+				reviewState = "✓"
+			case "CHANGES_REQUESTED":
+				reviewState = "✗"
+			}
+		}
+		if reviewState != "" {
+			if prInfo != "" {
+				prInfo += " "
+			}
+			prInfo += reviewState
+		}
+	}
+
 	// Status message (temporary)
 	statusMsg := ""
 	if a.statusMessage != "" {
@@ -476,22 +501,29 @@ func (a *App) renderStatusBar() string {
 		a.statusMessage = "" // Clear after showing
 	}
 
-	// Build status bar
-	left := fmt.Sprintf(" %s  %s  %s", branch, mode, fileCount)
+	// Build status bar - left side
+	left := fmt.Sprintf(" %s  %s  %s", branch, modes, fileCount)
 	if stats != "" {
 		left += "  " + stats
 	}
+	if prInfo != "" {
+		left += "  " + prInfo
+	}
 	left += statusMsg
 
-	// Pad to full width
-	padding := a.width - lipgloss.Width(left)
+	// Right side - help hint
+	right := a.styles.Muted.Render("[?] help ")
+
+	// Calculate padding
+	contentWidth := lipgloss.Width(left) + lipgloss.Width(right)
+	padding := a.width - contentWidth
 	if padding < 0 {
 		padding = 0
 	}
 
 	return a.styles.StatusBar.
 		Width(a.width).
-		Render(left + strings.Repeat(" ", padding))
+		Render(left + strings.Repeat(" ", padding) + right)
 }
 
 func (a *App) renderWithModal(background string, modal window.Window) string {

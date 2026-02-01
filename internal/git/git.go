@@ -50,13 +50,13 @@ const (
 func (m FileViewMode) String() string {
 	switch m {
 	case FileViewChanged:
-		return ""
+		return "changed"
 	case FileViewAll:
-		return "all"
+		return "browse"
 	case FileViewDocs:
 		return "docs"
 	default:
-		return ""
+		return "changed"
 	}
 }
 

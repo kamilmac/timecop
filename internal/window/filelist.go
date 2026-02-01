@@ -65,6 +65,13 @@ func NewFileList(styles config.Styles) *FileList {
 // SetFiles updates the file list
 func (f *FileList) SetFiles(files []git.FileStatus) {
 	f.files = files
+
+	// Auto-collapse leaf folders when in browse mode
+	if f.viewMode == git.FileViewAll {
+		f.collapsed = make(map[string]bool) // reset first
+		f.collapseLeafFolders()
+	}
+
 	f.flatEntries = f.buildTree(files)
 	if f.cursor >= len(f.flatEntries) {
 		f.cursor = max(0, len(f.flatEntries)-1)
@@ -76,23 +83,13 @@ func (f *FileList) SetViewMode(mode git.FileViewMode) {
 	prevMode := f.viewMode
 	f.viewMode = mode
 
-	// When entering "all files" mode, auto-collapse leaf folders
-	if mode == git.FileViewAll && prevMode != git.FileViewAll {
-		f.collapseLeafFolders()
-	}
-
 	// When leaving "all files" mode, clear collapsed state
 	if mode != git.FileViewAll && prevMode == git.FileViewAll {
 		f.collapsed = make(map[string]bool)
 	}
 
-	// Rebuild tree with new collapsed state
-	if len(f.files) > 0 {
-		f.flatEntries = f.buildTree(f.files)
-		if f.cursor >= len(f.flatEntries) {
-			f.cursor = max(0, len(f.flatEntries)-1)
-		}
-	}
+	// Note: auto-collapse happens in SetFiles() when new files are loaded
+	// This ensures we have the correct file list before collapsing
 }
 
 // collapseLeafFolders collapses all folders that contain only files (no subdirectories)

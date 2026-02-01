@@ -54,8 +54,8 @@ const (
 	DiffLineNumWidth       = 4  // width for line numbers
 
 	// Content limits
-	DiffMaxLines  = 10000 // max lines before truncation
-	DiffTabWidth  = 4     // spaces per tab
+	DiffMaxLines = 10000 // max lines before truncation
+	DiffTabWidth = 4     // spaces per tab
 
 	// Comment display
 	DiffCommentMargin   = 6  // margin for inline comments
@@ -78,7 +78,7 @@ const (
 
 const (
 	TreeIndentSize        = 2 // spaces per depth level
-	TreeAutoCollapseDepth = 2 // minimum depth for auto-collapse in browse mode (0 = root)
+	TreeAutoCollapseDepth = 1 // minimum depth for auto-collapse in browse mode (0 = root)
 )
 
 // Tree display characters
