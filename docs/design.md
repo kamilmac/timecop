@@ -449,6 +449,23 @@ User Input → App.Update() → Global keys or delegate to window
     → State update → Re-render
 ```
 
+## Future: Folder Selection & PR Summary
+
+Enable selecting folders in FileList to view aggregated content:
+
+- **Folder highlighting** - Allow cursor to land on directories, not just files
+- **Folder diff** - When folder selected, show combined diff of all changed files within
+- **Root folder = PR view** - When top-level (repo root) is selected:
+  - Show PR summary (title, description, author)
+  - Show PR reviews and general comments (not attached to specific lines)
+  - Show relevant commits for the PR
+- **Scope filtering** - Selecting a subfolder filters commits to those touching that path
+
+This transforms Blocks into a true PR review tool where you can:
+1. Start at repo root to see PR overview
+2. Drill into folders to scope review
+3. Select individual files for line-by-line review with inline comments
+
 ## Future: Docs Integration
 
 The workflow: write markdown specs → AI implements → review changes.
