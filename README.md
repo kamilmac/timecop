@@ -1,6 +1,21 @@
 # Kimchi
 
-A read-first terminal IDE for AI-driven development workflows.
+**AI writes code. You review it.**
+
+```bash
+go install github.com/kmacinski/blocks@latest
+kimchi
+```
+
+---
+
+## The Problem
+
+You're using Claude, Cursor, Copilot, whatever. AI writes code. You run `git diff` a thousand times. You alt-tab between terminal and editor. You scroll through walls of green and red. You miss things. You approve anyway.
+
+## The Solution
+
+A terminal UI that shows you what changed. That's it.
 
 ```
 ┌─────────────────────┬──────────────────────────────────────┐
@@ -8,111 +23,78 @@ A read-first terminal IDE for AI-driven development workflows.
 │ ▼ src/              │  12 │ func main() {          │       │
 │   > main.go      M  │  13 │-    oldLine()          │       │
 │     app.go       M  │  14 │+    newLine()          │       │
-│ ▼ internal/         │  15 │+    anotherLine()      │       │
-│   ▼ git/            │  16 │ }                      │       │
+│ ▼ internal/         │  15 │ }                      │       │
 │       git.go     A  │                                      │
 ├─────────────────────┤                                      │
-│ Commits (8)         │                                      │
-│ > abc1234 Add feat  │                                      │
-│   def5678 Fix bug   │                                      │
+│ Commits (3)         │                                      │
+│ > abc123 Add feat   │                                      │
 ├─────────────────────┴──────────────────────────────────────┤
-│ feature/branch  [branch]  4 files  +127 -43                │
+│ feature/thing  [branch]  4 files  +127 -43                 │
 └────────────────────────────────────────────────────────────┘
 ```
 
-## Why Kimchi?
+---
 
-When AI writes code, you don't need a traditional IDE. You need:
+## What It Does
 
-- **Visibility** - see what the AI is changing
-- **Navigation** - understand the codebase
-- **Review** - approve changes with confidence
-- **Context** - specs and docs alongside code
+- Shows changed files in a tree
+- Shows diffs side-by-side
+- Shows commits on your branch
+- Shows PR comments if you have `gh` installed
+- Refreshes automatically when files change
+- Vim keys because obviously
 
-This is read-heavy, not write-heavy. The human reviews, the AI writes.
+## What It Doesn't Do
 
-## Features
+- Edit files
+- Run commands
+- Integrate with your AI tool
+- Solve world hunger
 
-- **Side-by-side diffs** - See changes with syntax highlighting
-- **File tree** - Navigate changed files with collapsible folders
-- **Commit history** - View recent commits with PR integration
-- **Multiple modes** - Switch between working changes, branch diff, browse, and docs
-- **PR integration** - See inline comments and review status via GitHub CLI
-- **Vim-style navigation** - `j`/`k`, `g`/`G`, `Ctrl+d`/`Ctrl+u`
-- **Auto-refresh** - Changes appear automatically (500ms debounce)
-- **Quick actions** - `y` to yank path, `o` to open in editor
+It's a viewer. Read-only. On purpose.
 
-## Installation
+---
 
-```bash
-go install github.com/kmacinski/blocks@latest
-```
+## Keys
 
-Or build from source:
-
-```bash
-git clone https://github.com/kmacinski/blocks
-cd blocks
-go build -o kimchi .
-```
-
-## Usage
-
-```bash
-kimchi              # Run in current directory
-kimchi /path/to/repo   # Run in specific directory
-```
-
-### Modes
-
-Press `m` to cycle through modes, or use number keys:
-
-| Key | Mode | Description |
-|-----|------|-------------|
-| `1` | changed:working | Uncommitted changes only |
-| `2` | changed:branch | All changes vs base branch (default) |
-| `3` | browse | Browse all files in repo |
-| `4` | docs | Browse markdown files only |
-
-### Navigation
-
-| Key | Action |
-|-----|--------|
-| `j`/`k` | Move up/down |
-| `J`/`K` | Fast move (5 lines) |
-| `h`/`l` | Collapse/expand folder |
-| `Tab` | Cycle focus clockwise |
-| `Ctrl+d`/`u` | Half-page scroll |
-| `g`/`G` | Go to top/bottom |
-
-### Actions
-
-| Key | Action |
-|-----|--------|
-| `y` | Copy file path (with line number in diff) |
-| `o` | Open in `$EDITOR` |
-| `r` | Refresh |
-| `?` | Show help |
+| Key | What |
+|-----|------|
+| `j`/`k` | Up/down |
+| `Tab` | Next pane |
+| `m` | Cycle modes |
+| `1-4` | Jump to mode |
+| `y` | Copy path |
+| `o` | Open in $EDITOR |
 | `q` | Quit |
+| `?` | Help |
 
-## GitHub Integration
+## Modes
 
-Kimchi integrates with `gh` CLI for PR features:
+| Key | Mode | Shows |
+|-----|------|-------|
+| `1` | working | Uncommitted changes |
+| `2` | branch | All changes vs base branch |
+| `3` | browse | All files |
+| `4` | docs | Markdown files |
 
-- Automatic PR detection for current branch
-- Inline comment display in diff view
-- Review status and PR description
-- Files with comments marked with `C` indicator
-
-Install GitHub CLI: https://cli.github.com/
+---
 
 ## Requirements
 
 - Go 1.21+
 - Git
-- Terminal with 256 color support
-- Optional: `gh` CLI for GitHub features
+- A terminal
+- Optional: `gh` CLI for PR stuff
 
-## License
+## Build
 
-MIT
+```bash
+git clone https://github.com/kmacinski/blocks
+cd blocks
+go build -o kimchi .
+./kimchi
+```
+
+---
+
+MIT License. Do whatever.
