@@ -432,12 +432,13 @@ func (d *DiffView) styleUnifiedDiff(content string) string {
 
 		styled = append(styled, styledLine)
 
-		// Add comments for this line
+		// Add comments for this line (only once per line)
 		if newLineNum > 0 {
 			if comments, ok := commentsByLine[newLineNum]; ok {
 				for _, c := range comments {
 					styled = append(styled, d.renderComment(c)...)
 				}
+				delete(commentsByLine, newLineNum) // Remove so we don't render again
 			}
 		}
 	}
