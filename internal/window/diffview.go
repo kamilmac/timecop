@@ -14,6 +14,12 @@ import (
 	"github.com/kmacinski/blocks/internal/ui"
 )
 
+// lineLocation maps a rendered line to its source file and line number
+type lineLocation struct {
+	filePath string
+	lineNum  int
+}
+
 // DiffView displays a diff
 type DiffView struct {
 	Base
@@ -27,6 +33,10 @@ type DiffView struct {
 	ready      bool
 	width      int
 	height     int
+
+	// Line tracking for editor navigation
+	lineMap []lineLocation // maps rendered line index to file/line
+	cursor  int            // cursor position within viewport (0 = first visible line)
 }
 
 // NewDiffView creates a new diff view window
@@ -37,12 +47,33 @@ func NewDiffView(styles ui.Styles) *DiffView {
 	}
 }
 
+// GetSelectedLocation returns the file path and line number at cursor
+func (d *DiffView) GetSelectedLocation() (filePath string, lineNum int) {
+	if len(d.lineMap) == 0 {
+		return d.filePath, 1
+	}
+	// Calculate actual line index (viewport offset + cursor)
+	lineIdx := d.viewport.YOffset + d.cursor
+	if lineIdx >= len(d.lineMap) {
+		lineIdx = len(d.lineMap) - 1
+	}
+	if lineIdx < 0 {
+		lineIdx = 0
+	}
+	loc := d.lineMap[lineIdx]
+	if loc.filePath == "" {
+		return d.filePath, loc.lineNum
+	}
+	return loc.filePath, loc.lineNum
+}
+
 // SetContent updates the diff content
 func (d *DiffView) SetContent(content string, filePath string) {
 	d.content = content
 	d.filePath = filePath
 	d.folderPath = ""
 	d.isRoot = false
+	d.cursor = 0
 	if d.ready {
 		styled := d.renderContent(content)
 		d.viewport.SetContent(styled)
@@ -76,6 +107,7 @@ func (d *DiffView) SetFolderContent(content string, folderPath string, isRoot bo
 	d.folderPath = folderPath
 	d.isRoot = isRoot
 	d.pr = pr
+	d.cursor = 0
 
 	if d.ready {
 		var styled string
@@ -96,22 +128,32 @@ func (d *DiffView) Update(msg tea.Msg) (Window, tea.Cmd) {
 	}
 
 	var cmd tea.Cmd
+	totalLines := len(d.lineMap)
+	if totalLines == 0 {
+		totalLines = 1
+	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, keys.DefaultKeyMap.Down):
-			d.viewport.LineDown(1)
+			d.moveCursor(1, totalLines)
 		case key.Matches(msg, keys.DefaultKeyMap.Up):
-			d.viewport.LineUp(1)
+			d.moveCursor(-1, totalLines)
+		case key.Matches(msg, keys.DefaultKeyMap.FastDown):
+			d.moveCursor(5, totalLines)
+		case key.Matches(msg, keys.DefaultKeyMap.FastUp):
+			d.moveCursor(-5, totalLines)
 		case key.Matches(msg, keys.DefaultKeyMap.HalfPgDn):
-			d.viewport.HalfViewDown()
+			d.moveCursor(d.viewport.Height/2, totalLines)
 		case key.Matches(msg, keys.DefaultKeyMap.HalfPgUp):
-			d.viewport.HalfViewUp()
+			d.moveCursor(-d.viewport.Height/2, totalLines)
 		case key.Matches(msg, keys.DefaultKeyMap.GotoTop):
 			d.viewport.GotoTop()
+			d.cursor = 0
 		case key.Matches(msg, keys.DefaultKeyMap.GotoBot):
 			d.viewport.GotoBottom()
+			d.cursor = min(d.viewport.Height-1, totalLines-1-d.viewport.YOffset)
 		default:
 			d.viewport, cmd = d.viewport.Update(msg)
 		}
@@ -120,6 +162,33 @@ func (d *DiffView) Update(msg tea.Msg) (Window, tea.Cmd) {
 	}
 
 	return d, cmd
+}
+
+func (d *DiffView) moveCursor(delta int, totalLines int) {
+	// Calculate absolute line position
+	absLine := d.viewport.YOffset + d.cursor + delta
+
+	// Clamp to valid range
+	if absLine < 0 {
+		absLine = 0
+	}
+	if absLine >= totalLines {
+		absLine = totalLines - 1
+	}
+
+	// Update cursor and viewport
+	if absLine < d.viewport.YOffset {
+		// Scroll up
+		d.viewport.SetYOffset(absLine)
+		d.cursor = 0
+	} else if absLine >= d.viewport.YOffset+d.viewport.Height {
+		// Scroll down
+		d.viewport.SetYOffset(absLine - d.viewport.Height + 1)
+		d.cursor = d.viewport.Height - 1
+	} else {
+		// Just move cursor within viewport
+		d.cursor = absLine - d.viewport.YOffset
+	}
 }
 
 // View renders the diff view
@@ -190,7 +259,18 @@ func (d *DiffView) View(width, height int) string {
 			lines = append(lines, "")
 		}
 	} else {
-		lines = append(lines, d.viewport.View())
+		// Get viewport content and highlight cursor line
+		viewportContent := d.viewport.View()
+		if d.focused && len(d.lineMap) > 0 {
+			viewportLines := strings.Split(viewportContent, "\n")
+			if d.cursor >= 0 && d.cursor < len(viewportLines) {
+				// Highlight cursor line with reverse video
+				cursorStyle := lipgloss.NewStyle().Reverse(true)
+				viewportLines[d.cursor] = cursorStyle.Render(viewportLines[d.cursor])
+			}
+			viewportContent = strings.Join(viewportLines, "\n")
+		}
+		lines = append(lines, viewportContent)
 	}
 
 	content := strings.Join(lines, "\n")
@@ -223,6 +303,7 @@ func (d *DiffView) getTitle() string {
 }
 
 func (d *DiffView) renderPRSummary() string {
+	d.lineMap = nil // No line navigation for PR summary
 	var lines []string
 
 	if d.pr == nil {
@@ -351,10 +432,13 @@ func (d *DiffView) isDiffContent(content string) bool {
 // renderPlainFile renders file content without line numbers (unified style)
 func (d *DiffView) renderPlainFile(content string) string {
 	var styled []string
+	var lineMap []lineLocation
 	lines := strings.Split(content, "\n")
-	for _, line := range lines {
+	for i, line := range lines {
 		styled = append(styled, d.styles.DiffContext.Render(line))
+		lineMap = append(lineMap, lineLocation{filePath: d.filePath, lineNum: i + 1})
 	}
+	d.lineMap = lineMap
 	return strings.Join(styled, "\n")
 }
 
@@ -362,6 +446,7 @@ func (d *DiffView) renderPlainFile(content string) string {
 func (d *DiffView) renderFileWithLineNumbers(content string) string {
 	lines := strings.Split(content, "\n")
 	var result []string
+	var lineMap []lineLocation
 
 	// Calculate line number width based on total lines
 	numWidth := len(fmt.Sprintf("%d", len(lines)))
@@ -386,63 +471,99 @@ func (d *DiffView) renderFileWithLineNumbers(content string) string {
 		styledNum := d.styles.Muted.Render(numStr + " │")
 		styledLine := d.styles.DiffContext.Render(line)
 		result = append(result, styledNum+styledLine)
+		lineMap = append(lineMap, lineLocation{filePath: d.filePath, lineNum: lineNum})
 	}
 
+	d.lineMap = lineMap
 	return strings.Join(result, "\n")
 }
 
 func (d *DiffView) styleUnifiedDiff(content string) string {
 	if content == "" {
+		d.lineMap = nil
 		return ""
 	}
 
-	// Build a map of comments by line number
-	commentsByLine := make(map[int][]github.LineComment)
-	if d.pr != nil && d.filePath != "" {
-		for _, c := range d.pr.FileComments[d.filePath] {
-			commentsByLine[c.Line] = append(commentsByLine[c.Line], c)
-		}
-	}
-
-	var styled []string
-	lines := strings.Split(content, "\n")
-	var newLineNum int
-
-	for _, line := range lines {
-		var styledLine string
-
-		// Track line numbers from hunk headers
-		if strings.HasPrefix(line, "@@") {
-			_, newLineNum = parseHunkHeader(line)
-			newLineNum-- // Will be incremented below
-			styledLine = d.styles.DiffHeader.Render(line)
-		} else if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
-			styledLine = d.styles.DiffAdded.Render(line)
-			newLineNum++
-		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
-			styledLine = d.styles.DiffRemoved.Render(line)
-			// Don't increment newLineNum for removed lines
-		} else if strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") ||
-			strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
-			styledLine = d.styles.Muted.Render(line)
-		} else {
-			styledLine = d.styles.DiffContext.Render(line)
-			newLineNum++
-		}
-
-		styled = append(styled, styledLine)
-
-		// Add comments for this line (only once per line)
-		if newLineNum > 0 {
-			if comments, ok := commentsByLine[newLineNum]; ok {
-				for _, c := range comments {
-					styled = append(styled, d.renderComment(c)...)
-				}
-				delete(commentsByLine, newLineNum) // Remove so we don't render again
+	// Build a map of comments by line number (per file)
+	commentsByFile := make(map[string]map[int][]github.LineComment)
+	if d.pr != nil {
+		for filePath, comments := range d.pr.FileComments {
+			commentsByFile[filePath] = make(map[int][]github.LineComment)
+			for _, c := range comments {
+				commentsByFile[filePath][c.Line] = append(commentsByFile[filePath][c.Line], c)
 			}
 		}
 	}
 
+	var styled []string
+	var lineMap []lineLocation
+	lines := strings.Split(content, "\n")
+	var newLineNum int
+	var currentFile string
+
+	// Use d.filePath if set (single file view)
+	if d.filePath != "" {
+		currentFile = d.filePath
+	}
+
+	for _, line := range lines {
+		var styledLine string
+		var loc lineLocation
+
+		// Track current file from diff headers
+		if strings.HasPrefix(line, "diff --git") {
+			// Extract file path: "diff --git a/path b/path" -> "path"
+			parts := strings.Split(line, " b/")
+			if len(parts) == 2 {
+				currentFile = parts[1]
+			}
+			// Skip diff header lines
+			continue
+		} else if strings.HasPrefix(line, "@@") {
+			_, newLineNum = parseHunkHeader(line)
+			newLineNum-- // Will be incremented below
+			// Skip hunk headers
+			continue
+		} else if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			newLineNum++
+			styledLine = d.styles.DiffAdded.Render(line)
+			loc = lineLocation{filePath: currentFile, lineNum: newLineNum}
+		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			styledLine = d.styles.DiffRemoved.Render(line)
+			// Removed lines don't have a new line number, use previous
+			loc = lineLocation{filePath: currentFile, lineNum: newLineNum}
+		} else if strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+			// Skip metadata lines
+			continue
+		} else {
+			newLineNum++
+			styledLine = d.styles.DiffContext.Render(line)
+			loc = lineLocation{filePath: currentFile, lineNum: newLineNum}
+		}
+
+		styled = append(styled, styledLine)
+		lineMap = append(lineMap, loc)
+
+		// Add comments for this line (only once per line)
+		if newLineNum > 0 && currentFile != "" {
+			if fileComments, ok := commentsByFile[currentFile]; ok {
+				if comments, ok := fileComments[newLineNum]; ok {
+					for _, c := range comments {
+						commentLines := d.renderComment(c)
+						styled = append(styled, commentLines...)
+						// Add lineMap entries for comment lines
+						for range commentLines {
+							lineMap = append(lineMap, loc)
+						}
+					}
+					delete(fileComments, newLineNum) // Remove so we don't render again
+				}
+			}
+		}
+	}
+
+	d.lineMap = lineMap
 	return strings.Join(styled, "\n")
 }
 
@@ -532,18 +653,24 @@ func (d *DiffView) renderSideBySide(content string) string {
 		return d.styleUnifiedDiff(content)
 	}
 
-	// Build comments map by line number
-	commentsByLine := make(map[int][]github.LineComment)
-	if d.pr != nil && d.filePath != "" {
-		if comments, ok := d.pr.FileComments[d.filePath]; ok {
+	// Build comments map by line number (per file for folder view)
+	commentsByFile := make(map[string]map[int][]github.LineComment)
+	if d.pr != nil {
+		for filePath, comments := range d.pr.FileComments {
+			commentsByFile[filePath] = make(map[int][]github.LineComment)
 			for _, c := range comments {
-				commentsByLine[c.Line] = append(commentsByLine[c.Line], c)
+				commentsByFile[filePath][c.Line] = append(commentsByFile[filePath][c.Line], c)
 			}
 		}
 	}
 
 	lines := strings.Split(content, "\n")
 	var result []string
+	var lineMap []lineLocation
+	var currentFile string
+	if d.filePath != "" {
+		currentFile = d.filePath
+	}
 
 	// Calculate pane width (half of available space minus separator)
 	paneWidth := (d.viewport.Width - 3) / 2 // 3 for " │ " separator
@@ -561,20 +688,26 @@ func (d *DiffView) renderSideBySide(content string) string {
 	for i < len(lines) {
 		line := lines[i]
 
-		// Header lines (diff, index, ---, +++)
-		if strings.HasPrefix(line, "diff ") || strings.HasPrefix(line, "index ") ||
-			strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
-			// Render header across full width
-			result = append(result, d.styles.Muted.Render(truncateOrPad(line, d.viewport.Width)))
+		// Track file from diff header
+		if strings.HasPrefix(line, "diff --git") {
+			parts := strings.Split(line, " b/")
+			if len(parts) == 2 {
+				currentFile = parts[1]
+			}
 			i++
 			continue
 		}
 
-		// Hunk header
+		// Header lines (index, ---, +++)
+		if strings.HasPrefix(line, "index ") ||
+			strings.HasPrefix(line, "---") || strings.HasPrefix(line, "+++") {
+			i++
+			continue
+		}
+
+		// Hunk header - parse but don't display
 		if strings.HasPrefix(line, "@@") {
-			// Parse line numbers from @@ -old,len +new,len @@
 			leftNum, rightNum = parseHunkHeader(line)
-			result = append(result, d.styles.DiffHeader.Render(truncateOrPad(line, d.viewport.Width)))
 			i++
 			continue
 		}
@@ -583,15 +716,25 @@ func (d *DiffView) renderSideBySide(content string) string {
 		if len(line) == 0 || (len(line) > 0 && line[0] != '+' && line[0] != '-') {
 			text := line
 			if len(text) > 0 {
-				text = text[1:] // Remove leading space if present
+				text = text[1:]
 			}
 			left := d.formatSideLine(leftNum, text, lineContext, numWidth, paneWidth)
 			right := d.formatSideLine(rightNum, text, lineContext, numWidth, paneWidth)
 			result = append(result, left+d.styles.Muted.Render(" │ ")+right)
+			lineMap = append(lineMap, lineLocation{filePath: currentFile, lineNum: rightNum})
 			// Add comments for this line
-			if comments, ok := commentsByLine[rightNum]; ok {
-				for _, c := range comments {
-					result = append(result, d.renderComment(c)...)
+			if currentFile != "" {
+				if fileComments, ok := commentsByFile[currentFile]; ok {
+					if comments, ok := fileComments[rightNum]; ok {
+						for _, c := range comments {
+							commentLines := d.renderComment(c)
+							result = append(result, commentLines...)
+							for range commentLines {
+								lineMap = append(lineMap, lineLocation{filePath: currentFile, lineNum: rightNum})
+							}
+						}
+						delete(fileComments, rightNum)
+					}
 				}
 			}
 			leftNum++
@@ -635,18 +778,27 @@ func (d *DiffView) renderSideBySide(content string) string {
 			}
 
 			result = append(result, left+d.styles.Muted.Render(" │ ")+right)
+			lineMap = append(lineMap, lineLocation{filePath: currentFile, lineNum: max(currentRightNum, leftNum-1)})
 
 			// Add comments for the new line
-			if currentRightNum > 0 {
-				if comments, ok := commentsByLine[currentRightNum]; ok {
-					for _, c := range comments {
-						result = append(result, d.renderComment(c)...)
+			if currentRightNum > 0 && currentFile != "" {
+				if fileComments, ok := commentsByFile[currentFile]; ok {
+					if comments, ok := fileComments[currentRightNum]; ok {
+						for _, c := range comments {
+							commentLines := d.renderComment(c)
+							result = append(result, commentLines...)
+							for range commentLines {
+								lineMap = append(lineMap, lineLocation{filePath: currentFile, lineNum: currentRightNum})
+							}
+						}
+						delete(fileComments, currentRightNum)
 					}
 				}
 			}
 		}
 	}
 
+	d.lineMap = lineMap
 	return strings.Join(result, "\n")
 }
 

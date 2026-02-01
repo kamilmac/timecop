@@ -7,6 +7,8 @@ type KeyMap struct {
 	// Navigation
 	Up        key.Binding
 	Down      key.Binding
+	FastUp    key.Binding
+	FastDown  key.Binding
 	Left      key.Binding
 	Right     key.Binding
 	HalfPgUp  key.Binding
@@ -46,6 +48,14 @@ var DefaultKeyMap = KeyMap{
 	Down: key.NewBinding(
 		key.WithKeys("j", "down"),
 		key.WithHelp("j/k", "navigate"),
+	),
+	FastUp: key.NewBinding(
+		key.WithKeys("K"),
+		key.WithHelp("J/K", "fast navigate"),
+	),
+	FastDown: key.NewBinding(
+		key.WithKeys("J"),
+		key.WithHelp("J/K", "fast navigate"),
 	),
 	Left: key.NewBinding(
 		key.WithKeys("h"),

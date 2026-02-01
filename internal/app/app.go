@@ -224,16 +224,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case key.Matches(msg, keys.DefaultKeyMap.Yank):
-			if a.state.SelectedFile != "" {
-				if err := clipboard.WriteAll(a.state.SelectedFile); err == nil {
-					a.statusMessage = fmt.Sprintf("Copied: %s", a.state.SelectedFile)
+			var toCopy string
+			if a.state.FocusedWindow == "diffview" {
+				filePath, lineNum := a.diffView.GetSelectedLocation()
+				if filePath != "" && lineNum > 0 {
+					toCopy = fmt.Sprintf("%s:%d", filePath, lineNum)
+				} else if filePath != "" {
+					toCopy = filePath
+				}
+			} else if a.state.SelectedFile != "" {
+				toCopy = a.state.SelectedFile
+			}
+			if toCopy != "" {
+				if err := clipboard.WriteAll(toCopy); err == nil {
+					a.statusMessage = fmt.Sprintf("Copied: %s", toCopy)
 				}
 			}
 			return a, nil
 
 		case key.Matches(msg, keys.DefaultKeyMap.OpenEditor):
-			if a.state.SelectedFile != "" {
-				return a, a.openInEditor(a.state.SelectedFile)
+			// Get file and line from diffview if focused there
+			if a.state.FocusedWindow == "diffview" {
+				filePath, lineNum := a.diffView.GetSelectedLocation()
+				if filePath != "" {
+					return a, a.openInEditorAtLine(filePath, lineNum)
+				}
+			} else if a.state.SelectedFile != "" {
+				return a, a.openInEditorAtLine(a.state.SelectedFile, 1)
 			}
 			return a, nil
 		}
@@ -539,12 +556,22 @@ func (a *App) loadDiffStats() tea.Cmd {
 }
 
 func (a *App) openInEditor(path string) tea.Cmd {
+	return a.openInEditorAtLine(path, 1)
+}
+
+func (a *App) openInEditorAtLine(path string, line int) tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "vim"
 	}
 
-	c := exec.Command(editor, path)
+	// Most editors support +line syntax (vim, nvim, nano, emacs, etc.)
+	var c *exec.Cmd
+	if line > 1 {
+		c = exec.Command(editor, fmt.Sprintf("+%d", line), path)
+	} else {
+		c = exec.Command(editor, path)
+	}
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		return RefreshMsg{}
 	})
