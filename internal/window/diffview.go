@@ -138,6 +138,10 @@ func (d *DiffView) Update(msg tea.Msg) (Window, tea.Cmd) {
 			d.moveCursor(1, totalLines)
 		case key.Matches(msg, keys.DefaultKeyMap.Up):
 			d.moveCursor(-1, totalLines)
+		case key.Matches(msg, keys.DefaultKeyMap.FastDown):
+			d.moveCursor(5, totalLines)
+		case key.Matches(msg, keys.DefaultKeyMap.FastUp):
+			d.moveCursor(-5, totalLines)
 		case key.Matches(msg, keys.DefaultKeyMap.HalfPgDn):
 			d.moveCursor(d.viewport.Height/2, totalLines)
 		case key.Matches(msg, keys.DefaultKeyMap.HalfPgUp):

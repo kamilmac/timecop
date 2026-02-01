@@ -296,6 +296,14 @@ func (f *FileList) Update(msg tea.Msg) (Window, tea.Cmd) {
 				f.ensureVisible()
 				return f, f.selectCurrent()
 			}
+		case key.Matches(msg, keys.DefaultKeyMap.FastDown):
+			f.cursor = min(f.cursor+5, len(f.flatEntries)-1)
+			f.ensureVisible()
+			return f, f.selectCurrent()
+		case key.Matches(msg, keys.DefaultKeyMap.FastUp):
+			f.cursor = max(f.cursor-5, 0)
+			f.ensureVisible()
+			return f, f.selectCurrent()
 		case key.Matches(msg, keys.DefaultKeyMap.GotoTop):
 			f.cursor = 0
 			f.offset = 0
