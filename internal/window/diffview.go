@@ -209,27 +209,19 @@ func (d *DiffView) View(width, height int) string {
 	// Initialize or resize viewport
 	if !d.ready {
 		d.viewport = viewport.New(contentWidth, contentHeight-1) // -1 for title
-		if d.isRoot {
-			d.viewport.SetContent(d.renderPRSummary())
-		} else {
-			d.viewport.SetContent(d.renderContent(d.content))
-		}
+		d.viewport.SetContent(d.getViewportContent())
 		d.ready = true
 	} else if d.viewport.Width != contentWidth || d.viewport.Height != contentHeight-1 {
 		d.viewport.Width = contentWidth
 		d.viewport.Height = contentHeight - 1
 		// Re-render content when width changes
-		if d.isRoot {
-			d.viewport.SetContent(d.renderPRSummary())
-		} else {
-			d.viewport.SetContent(d.renderContent(d.content))
-		}
+		d.viewport.SetContent(d.getViewportContent())
 	}
 	// Build content
 	var lines []string
 	// Title with scroll position
 	titleText := d.getTitle()
-	hasContent := d.content != "" || d.isRoot
+	hasContent := d.content != "" || d.isRoot || d.commit != nil
 	if hasContent {
 		scrollPos := d.formatScrollPos()
 		padding := max(0, contentWidth-len(titleText)-len(scrollPos)-4)
@@ -289,6 +281,17 @@ func (d *DiffView) getTitle() string {
 	}
 	return "Diff"
 }
+// getViewportContent returns the appropriate content for the viewport
+func (d *DiffView) getViewportContent() string {
+	if d.commit != nil {
+		return d.renderCommitView()
+	}
+	if d.isRoot {
+		return d.renderPRSummary()
+	}
+	return d.renderContent(d.content)
+}
+
 func (d *DiffView) renderPRSummary() string {
 	d.lineMap = nil // No line navigation for PR summary
 	return d.prRenderer.Render(d.pr)
