@@ -211,14 +211,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.cycleFocus(true)
 			return a, nil
 
-		case key.Matches(msg, keys.DefaultKeyMap.Left):
-			a.focusPrev()
-			return a, nil
-
-		case key.Matches(msg, keys.DefaultKeyMap.Right):
-			a.focusNext()
-			return a, nil
-
 		case key.Matches(msg, keys.DefaultKeyMap.Yank):
 			var toCopy string
 			if a.state.FocusedWindow == config.WindowDiffView {
@@ -361,14 +353,6 @@ func (a *App) cycleFocus(reverse bool) {
 	windowOrder := []string{config.WindowFileList, config.WindowDiffView}
 	a.state.CycleWindow(windowOrder, reverse)
 	a.updateFocus()
-}
-
-func (a *App) focusNext() {
-	a.cycleFocus(false)
-}
-
-func (a *App) focusPrev() {
-	a.cycleFocus(true)
 }
 
 func (a *App) updateFocus() {

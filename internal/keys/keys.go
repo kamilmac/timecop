@@ -56,11 +56,11 @@ var DefaultKeyMap = KeyMap{
 	),
 	Left: key.NewBinding(
 		key.WithKeys("h"),
-		key.WithHelp("h/l", "switch window"),
+		key.WithHelp("h", "collapse folder"),
 	),
 	Right: key.NewBinding(
 		key.WithKeys("l"),
-		key.WithHelp("h/l", "switch window"),
+		key.WithHelp("l", "expand folder"),
 	),
 	HalfPgUp: key.NewBinding(
 		key.WithKeys("ctrl+u"),

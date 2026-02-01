@@ -57,8 +57,8 @@ func (h *Help) View(width, height int) string {
 	}{
 		{"j/k", "Move up/down"},
 		{"J/K", "Fast move (5 lines)"},
-		{"h/l", "Switch window"},
-		{"Tab", "Cycle windows"},
+		{"h/l", "Collapse/expand folder"},
+		{"Tab", "Switch window"},
 		{"Ctrl+d/u", "Scroll half page"},
 		{"g/G", "Go to top/bottom"},
 		{"Enter", "Select file/folder"},
@@ -119,9 +119,9 @@ func (h *Help) View(width, height int) string {
 
 	// Tips section
 	lines = append(lines, h.styles.Bold.Render("Tips"))
-	lines = append(lines, h.styles.Muted.Render("• Select a folder to see combined diff"))
-	lines = append(lines, h.styles.Muted.Render("• Select root to see PR summary"))
-	lines = append(lines, h.styles.Muted.Render("• Files with PR comments show 'C' indicator"))
+	lines = append(lines, h.styles.Muted.Render("• Collapse folders with h, expand with l"))
+	lines = append(lines, h.styles.Muted.Render("• Collapsed folders show aggregated status"))
+	lines = append(lines, h.styles.Muted.Render("• Select root (./) to see PR summary"))
 	lines = append(lines, "")
 
 	lines = append(lines, h.styles.Muted.Render("Press ? or Esc to close"))

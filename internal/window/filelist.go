@@ -27,13 +27,16 @@ type treeNode struct {
 
 // flatEntry is a flattened tree entry for display/navigation
 type flatEntry struct {
-	display  string
-	path     string // full path (for files) or dir path (for folders)
-	isDir    bool
-	isRoot   bool // special root entry for PR summary
-	depth    int
-	status   git.Status
-	children []string // paths of child files (for directories)
+	display     string
+	path        string // full path (for files) or dir path (for folders)
+	isDir       bool
+	isRoot      bool // special root entry for PR summary
+	depth       int
+	status      git.Status
+	children    []string     // paths of child files (for directories)
+	collapsed   bool         // true if folder is collapsed
+	childStats  []git.Status // aggregated statuses from children (for collapsed folders)
+	hasComments bool         // true if any child has comments (for collapsed folders)
 }
 
 // FileList displays a list of changed files
@@ -47,12 +50,14 @@ type FileList struct {
 	height      int
 	width       int
 	onSelect    func(index int, path string) tea.Cmd
+	collapsed   map[string]bool // tracks collapsed folders by path
 }
 
 // NewFileList creates a new file list window
 func NewFileList(styles config.Styles) *FileList {
 	return &FileList{
-		Base: NewBase("filelist", styles),
+		Base:      NewBase("filelist", styles),
+		collapsed: make(map[string]bool),
 	}
 }
 
@@ -119,22 +124,92 @@ func (f *FileList) buildTree(files []git.FileStatus) []flatEntry {
 	// Flatten tree for display - start with root entry
 	var entries []flatEntry
 
-	// Add root entry (represents whole repo / PR summary)
-	entries = append(entries, flatEntry{
-		display:  "./",
-		path:     "",
-		isDir:    true,
-		isRoot:   true,
-		depth:    0,
-		children: allPaths,
-	})
-
-	// Build directory children map
+	// Build directory children map and status map
 	dirChildren := buildDirChildrenMap(files)
+	fileStatusMap := make(map[string]git.Status)
+	for _, file := range files {
+		fileStatusMap[file.Path] = file.Status
+	}
 
-	flattenTreeWithChildren(root, &entries, 0, dirChildren)
+	// Add root entry (represents whole repo / PR summary)
+	rootCollapsed := f.collapsed[""]
+	rootEntry := flatEntry{
+		display:   "./",
+		path:      "",
+		isDir:     true,
+		isRoot:    true,
+		depth:     0,
+		children:  allPaths,
+		collapsed: rootCollapsed,
+	}
+	if rootCollapsed {
+		rootEntry.childStats, rootEntry.hasComments = f.aggregateChildStats(allPaths, fileStatusMap)
+	}
+	entries = append(entries, rootEntry)
+
+	// Don't show children if root is collapsed
+	if !rootCollapsed {
+		f.flattenTreeWithCollapse(root, &entries, 0, dirChildren, fileStatusMap)
+	}
 
 	return entries
+}
+
+// flattenTreeWithCollapse flattens tree respecting collapsed state
+func (f *FileList) flattenTreeWithCollapse(node *treeNode, entries *[]flatEntry, depth int, dirChildren map[string][]string, fileStatusMap map[string]git.Status) {
+	for _, child := range node.children {
+		isCollapsed := f.collapsed[child.path]
+
+		entry := flatEntry{
+			display:   child.name,
+			path:      child.path,
+			isDir:     child.isDir,
+			depth:     depth,
+			status:    child.status,
+			collapsed: isCollapsed,
+		}
+
+		if child.isDir {
+			entry.children = dirChildren[child.path]
+			if isCollapsed {
+				entry.childStats, entry.hasComments = f.aggregateChildStats(entry.children, fileStatusMap)
+			}
+		}
+
+		*entries = append(*entries, entry)
+
+		// Only recurse into non-collapsed directories
+		if child.isDir && !isCollapsed {
+			f.flattenTreeWithCollapse(child, entries, depth+1, dirChildren, fileStatusMap)
+		}
+	}
+}
+
+// aggregateChildStats returns unique statuses and comment presence for child files
+func (f *FileList) aggregateChildStats(children []string, fileStatusMap map[string]git.Status) ([]git.Status, bool) {
+	statusSet := make(map[git.Status]bool)
+	hasComments := false
+
+	for _, path := range children {
+		if status, ok := fileStatusMap[path]; ok && status != git.StatusUnchanged {
+			statusSet[status] = true
+		}
+		// Check for comments
+		if f.pr != nil && len(f.pr.FileComments[path]) > 0 {
+			hasComments = true
+		}
+	}
+
+	// Convert to slice in priority order: D, M, A, R, ?
+	var stats []git.Status
+	priority := []git.Status{git.StatusDeleted, git.StatusModified, git.StatusAdded, git.StatusRenamed, git.StatusUntracked}
+	for _, s := range priority {
+		if statusSet[s] {
+			stats = append(stats, s)
+		}
+	}
+
+	return stats, hasComments
 }
 
 func sortTree(node *treeNode) {
@@ -147,21 +222,6 @@ func sortTree(node *treeNode) {
 	})
 	for _, child := range node.children {
 		sortTree(child)
-	}
-}
-
-func flattenTree(node *treeNode, entries *[]flatEntry, depth int) {
-	for _, child := range node.children {
-		*entries = append(*entries, flatEntry{
-			display: child.name,
-			path:    child.path,
-			isDir:   child.isDir,
-			depth:   depth,
-			status:  child.status,
-		})
-		if child.isDir {
-			flattenTree(child, entries, depth+1)
-		}
 	}
 }
 
@@ -179,24 +239,6 @@ func buildDirChildrenMap(files []git.FileStatus) map[string][]string {
 	return result
 }
 
-func flattenTreeWithChildren(node *treeNode, entries *[]flatEntry, depth int, dirChildren map[string][]string) {
-	for _, child := range node.children {
-		entry := flatEntry{
-			display: child.name,
-			path:    child.path,
-			isDir:   child.isDir,
-			depth:   depth,
-			status:  child.status,
-		}
-		if child.isDir {
-			entry.children = dirChildren[child.path]
-		}
-		*entries = append(*entries, entry)
-		if child.isDir {
-			flattenTreeWithChildren(child, entries, depth+1, dirChildren)
-		}
-	}
-}
 
 // SetOnSelect sets the callback for when a file is selected
 func (f *FileList) SetOnSelect(fn func(index int, path string) tea.Cmd) {
@@ -312,6 +354,28 @@ func (f *FileList) Update(msg tea.Msg) (Window, tea.Cmd) {
 			f.cursor = max(0, len(f.flatEntries)-1)
 			f.ensureVisible()
 			return f, f.selectCurrent()
+		case key.Matches(msg, keys.DefaultKeyMap.Left):
+			// Collapse folder (h)
+			if f.cursor >= 0 && f.cursor < len(f.flatEntries) {
+				entry := f.flatEntries[f.cursor]
+				if entry.isDir && !entry.collapsed {
+					f.collapsed[entry.path] = true
+					f.flatEntries = f.buildTree(f.files)
+					f.ensureVisible()
+					return f, f.selectCurrent()
+				}
+			}
+		case key.Matches(msg, keys.DefaultKeyMap.Right):
+			// Expand folder (l)
+			if f.cursor >= 0 && f.cursor < len(f.flatEntries) {
+				entry := f.flatEntries[f.cursor]
+				if entry.isDir && entry.collapsed {
+					delete(f.collapsed, entry.path)
+					f.flatEntries = f.buildTree(f.files)
+					f.ensureVisible()
+					return f, f.selectCurrent()
+				}
+			}
 		}
 	}
 
@@ -407,7 +471,11 @@ func (f *FileList) renderTreeLine(entry flatEntry, selected bool, maxWidth int) 
 	// Icon/prefix
 	var prefix string
 	if entry.isDir {
-		prefix = "▼ "
+		if entry.collapsed {
+			prefix = "▶ "
+		} else {
+			prefix = "▼ "
+		}
 	} else {
 		prefix = "  "
 	}
@@ -415,9 +483,30 @@ func (f *FileList) renderTreeLine(entry flatEntry, selected bool, maxWidth int) 
 	// Name
 	name := entry.display
 
-	// Status indicator (only for files with changes)
+	// Status indicator
 	var statusStr string
-	if !entry.isDir && entry.status != git.StatusUnchanged {
+	if entry.isDir && entry.collapsed && len(entry.childStats) > 0 {
+		// Aggregated status for collapsed folders
+		var parts []string
+		for _, s := range entry.childStats {
+			var statusStyle lipgloss.Style
+			switch s {
+			case git.StatusModified:
+				statusStyle = f.styles.StatusModified
+			case git.StatusAdded:
+				statusStyle = f.styles.StatusAdded
+			case git.StatusDeleted:
+				statusStyle = f.styles.StatusDeleted
+			case git.StatusUntracked:
+				statusStyle = f.styles.StatusUntracked
+			case git.StatusRenamed:
+				statusStyle = f.styles.StatusRenamed
+			}
+			parts = append(parts, statusStyle.Render(s.String()))
+		}
+		statusStr = " " + strings.Join(parts, "")
+	} else if !entry.isDir && entry.status != git.StatusUnchanged {
+		// Single file status
 		var statusStyle lipgloss.Style
 		switch entry.status {
 		case git.StatusModified:
@@ -436,16 +525,25 @@ func (f *FileList) renderTreeLine(entry flatEntry, selected bool, maxWidth int) 
 
 	// Comment indicator
 	var commentStr string
-	if !entry.isDir && f.pr != nil && len(f.pr.FileComments[entry.path]) > 0 {
+	if entry.isDir && entry.collapsed && entry.hasComments {
+		// Collapsed folder with comments in children
+		commentStr = " " + f.styles.DiffHeader.Render("C")
+	} else if !entry.isDir && f.pr != nil && len(f.pr.FileComments[entry.path]) > 0 {
+		// Single file with comments
 		commentStr = " " + f.styles.DiffHeader.Render("C")
 	}
 
 	// Calculate available width for name
 	indentLen := len(indent)
-	prefixLen := 2 // "▼ " or "  "
+	prefixLen := 2 // "▼ " or "▶ " or "  "
 	statusLen := 0
-	if !entry.isDir && entry.status != git.StatusUnchanged {
-		statusLen = 3 // " M" or similar
+	if statusStr != "" {
+		// Rough estimate: each status is 2 chars (space + letter)
+		if entry.isDir && entry.collapsed {
+			statusLen = 1 + len(entry.childStats)
+		} else if !entry.isDir && entry.status != git.StatusUnchanged {
+			statusLen = 2
+		}
 	}
 	commentLen := 0
 	if commentStr != "" {
