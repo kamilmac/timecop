@@ -48,10 +48,12 @@ pub struct DiffViewState {
 
 #[derive(Debug, Clone)]
 pub struct DiffLine {
-    pub text: String,
-    pub line_type: LineType,
+    pub left_text: Option<String>,
+    pub right_text: Option<String>,
     pub left_num: Option<usize>,
     pub right_num: Option<usize>,
+    pub line_type: LineType,
+    pub is_header: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -81,10 +83,12 @@ impl DiffViewState {
             PreviewContent::FileDiff { content, .. } | PreviewContent::FolderDiff { content, .. } => {
                 if is_binary(content) {
                     vec![DiffLine {
-                        text: "Binary file".to_string(),
-                        line_type: LineType::Info,
+                        left_text: Some("Binary file".to_string()),
+                        right_text: None,
                         left_num: None,
                         right_num: None,
+                        line_type: LineType::Info,
+                        is_header: false,
                     }]
                 } else {
                     parse_diff(content)
@@ -93,10 +97,12 @@ impl DiffViewState {
             PreviewContent::FileContent { content, .. } => {
                 if is_binary(content) {
                     vec![DiffLine {
-                        text: "Binary file".to_string(),
-                        line_type: LineType::Info,
+                        left_text: Some("Binary file".to_string()),
+                        right_text: None,
                         left_num: None,
                         right_num: None,
+                        line_type: LineType::Info,
+                        is_header: false,
                     }]
                 } else {
                     parse_file_content(content)
@@ -114,7 +120,9 @@ impl DiffViewState {
             PreviewContent::FileDiff { path, .. } => path.clone(),
             PreviewContent::FolderDiff { path, .. } => format!("{}/", path),
             PreviewContent::FileContent { path, .. } => path.clone(),
-            PreviewContent::CommitSummary { .. } => "Commit & PR Summary".to_string(),
+            PreviewContent::CommitSummary { commit, .. } => {
+                format!("{} {}", commit.short_hash, commit.subject)
+            }
         }
     }
 
@@ -136,14 +144,6 @@ impl DiffViewState {
         self.cursor = self.cursor.saturating_sub(n);
     }
 
-    pub fn page_down(&mut self, height: usize) {
-        self.move_down_n(height / 2);
-    }
-
-    pub fn page_up(&mut self, height: usize) {
-        self.move_up_n(height / 2);
-    }
-
     pub fn go_top(&mut self) {
         self.cursor = 0;
         self.offset = 0;
@@ -153,8 +153,20 @@ impl DiffViewState {
         self.cursor = self.lines.len().saturating_sub(1);
     }
 
+    pub fn page_down(&mut self, amount: usize) {
+        self.move_down_n(amount);
+    }
+
+    pub fn page_up(&mut self, amount: usize) {
+        self.move_up_n(amount);
+    }
+
+    pub fn get_current_line_number(&self) -> Option<usize> {
+        self.lines.get(self.cursor).and_then(|line| line.right_num.or(line.left_num))
+    }
+
     pub fn ensure_visible(&mut self, height: usize) {
-        let visible_height = height.saturating_sub(3);
+        let visible_height = height.saturating_sub(1);
         if self.cursor < self.offset {
             self.offset = self.cursor;
         } else if self.cursor >= self.offset + visible_height {
@@ -163,20 +175,20 @@ impl DiffViewState {
     }
 
     pub fn scroll_percent(&self, height: usize) -> String {
-        if self.lines.is_empty() {
+        if self.lines.is_empty() || self.lines.len() <= height.saturating_sub(2) {
             return String::new();
         }
-        let visible_height = height.saturating_sub(3);
-        if self.lines.len() <= visible_height {
-            return String::new();
-        }
-        let max_offset = self.lines.len().saturating_sub(visible_height);
-        let percent = (self.offset * 100) / max_offset.max(1);
-        format!("{}%", percent)
+        let percent = (self.offset * 100) / self.lines.len().saturating_sub(height.saturating_sub(2)).max(1);
+        format!("{}%", percent.min(100))
     }
 
-    pub fn get_current_line_number(&self) -> Option<usize> {
-        self.lines.get(self.cursor).and_then(|l| l.right_num.or(l.left_num))
+    pub fn yank_content(&self) -> Option<String> {
+        match &self.content {
+            PreviewContent::FileDiff { content, .. } => Some(content.clone()),
+            PreviewContent::FolderDiff { content, .. } => Some(content.clone()),
+            PreviewContent::FileContent { content, .. } => Some(content.clone()),
+            _ => None,
+        }
     }
 }
 
@@ -186,64 +198,75 @@ fn is_binary(content: &str) -> bool {
 }
 
 fn parse_diff(content: &str) -> Vec<DiffLine> {
-    let mut lines = vec![];
-    let mut left_num = 0usize;
-    let mut right_num = 0usize;
+    let mut lines = Vec::new();
+    let mut left_num = 1usize;
+    let mut right_num = 1usize;
 
     for line in content.lines() {
         if line.starts_with("@@") {
-            // Parse hunk header for line numbers
-            if let Some((left, right)) = parse_hunk_header(line) {
-                left_num = left;
-                right_num = right;
+            if let Some((l, r)) = parse_hunk_header(line) {
+                left_num = l;
+                right_num = r;
             }
             lines.push(DiffLine {
-                text: line.to_string(),
-                line_type: LineType::Header,
+                left_text: Some(line.to_string()),
+                right_text: None,
                 left_num: None,
                 right_num: None,
+                line_type: LineType::Header,
+                is_header: true,
             });
         } else if line.starts_with("diff --git") || line.starts_with("index ")
             || line.starts_with("---") || line.starts_with("+++")
             || line.starts_with("new file") || line.starts_with("deleted file")
         {
             lines.push(DiffLine {
-                text: line.to_string(),
-                line_type: LineType::Header,
+                left_text: Some(line.to_string()),
+                right_text: None,
                 left_num: None,
                 right_num: None,
+                line_type: LineType::Header,
+                is_header: true,
             });
         } else if line.starts_with('+') {
             lines.push(DiffLine {
-                text: line[1..].to_string(),
-                line_type: LineType::Added,
+                left_text: None,
+                right_text: Some(line[1..].to_string()),
                 left_num: None,
                 right_num: Some(right_num),
+                line_type: LineType::Added,
+                is_header: false,
             });
             right_num += 1;
         } else if line.starts_with('-') {
             lines.push(DiffLine {
-                text: line[1..].to_string(),
-                line_type: LineType::Removed,
+                left_text: Some(line[1..].to_string()),
+                right_text: None,
                 left_num: Some(left_num),
                 right_num: None,
+                line_type: LineType::Removed,
+                is_header: false,
             });
             left_num += 1;
         } else if line.starts_with(' ') {
             lines.push(DiffLine {
-                text: line[1..].to_string(),
-                line_type: LineType::Context,
+                left_text: Some(line[1..].to_string()),
+                right_text: Some(line[1..].to_string()),
                 left_num: Some(left_num),
                 right_num: Some(right_num),
+                line_type: LineType::Context,
+                is_header: false,
             });
             left_num += 1;
             right_num += 1;
         } else {
             lines.push(DiffLine {
-                text: line.to_string(),
-                line_type: LineType::Context,
+                left_text: Some(line.to_string()),
+                right_text: None,
                 left_num: None,
                 right_num: None,
+                line_type: LineType::Context,
+                is_header: true,
             });
         }
     }
@@ -280,174 +303,79 @@ fn parse_file_content(content: &str) -> Vec<DiffLine> {
         .lines()
         .enumerate()
         .map(|(i, line)| DiffLine {
-            text: line.to_string(),
-            line_type: LineType::Context,
+            left_text: Some(line.to_string()),
+            right_text: Some(line.to_string()),
             left_num: Some(i + 1),
             right_num: Some(i + 1),
+            line_type: LineType::Context,
+            is_header: false,
         })
         .collect()
+}
+
+fn make_header_line(text: String, line_type: LineType) -> DiffLine {
+    DiffLine {
+        left_text: Some(text),
+        right_text: None,
+        left_num: None,
+        right_num: None,
+        line_type,
+        is_header: true,
+    }
 }
 
 fn parse_commit_summary(commit: &Commit, pr: Option<&PrInfo>) -> Vec<DiffLine> {
     let mut lines = vec![];
 
     // Commit info
-    lines.push(DiffLine {
-        text: "Commit".to_string(),
-        line_type: LineType::Header,
-        left_num: None,
-        right_num: None,
-    });
-    lines.push(DiffLine {
-        text: "─".repeat(40),
-        line_type: LineType::Info,
-        left_num: None,
-        right_num: None,
-    });
-    lines.push(DiffLine {
-        text: format!("Hash:   {}", commit.hash),
-        line_type: LineType::Context,
-        left_num: None,
-        right_num: None,
-    });
-    lines.push(DiffLine {
-        text: format!("Author: {}", commit.author),
-        line_type: LineType::Context,
-        left_num: None,
-        right_num: None,
-    });
-    lines.push(DiffLine {
-        text: format!("Date:   {}", commit.date),
-        line_type: LineType::Context,
-        left_num: None,
-        right_num: None,
-    });
-    lines.push(DiffLine {
-        text: String::new(),
-        line_type: LineType::Context,
-        left_num: None,
-        right_num: None,
-    });
-    lines.push(DiffLine {
-        text: commit.subject.clone(),
-        line_type: LineType::Info,
-        left_num: None,
-        right_num: None,
-    });
-    lines.push(DiffLine {
-        text: String::new(),
-        line_type: LineType::Context,
-        left_num: None,
-        right_num: None,
-    });
+    lines.push(make_header_line("Commit".to_string(), LineType::Header));
+    lines.push(make_header_line("─".repeat(40), LineType::Info));
+    lines.push(make_header_line(format!("Hash:   {}", commit.hash), LineType::Context));
+    lines.push(make_header_line(format!("Author: {}", commit.author), LineType::Context));
+    lines.push(make_header_line(format!("Date:   {}", commit.date), LineType::Context));
+    lines.push(make_header_line(String::new(), LineType::Context));
+    lines.push(make_header_line(commit.subject.clone(), LineType::Info));
+    lines.push(make_header_line(String::new(), LineType::Context));
 
     // PR info
     if let Some(pr) = pr {
-        lines.push(DiffLine {
-            text: String::new(),
-            line_type: LineType::Context,
-            left_num: None,
-            right_num: None,
-        });
-        lines.push(DiffLine {
-            text: "Pull Request".to_string(),
-            line_type: LineType::Header,
-            left_num: None,
-            right_num: None,
-        });
-        lines.push(DiffLine {
-            text: "─".repeat(40),
-            line_type: LineType::Info,
-            left_num: None,
-            right_num: None,
-        });
-        lines.push(DiffLine {
-            text: pr.title.clone(),
-            line_type: LineType::Info,
-            left_num: None,
-            right_num: None,
-        });
-        lines.push(DiffLine {
-            text: format!("#{} by {} [{}]", pr.number, pr.author, pr.state),
-            line_type: LineType::Context,
-            left_num: None,
-            right_num: None,
-        });
-        lines.push(DiffLine {
-            text: pr.url.clone(),
-            line_type: LineType::Context,
-            left_num: None,
-            right_num: None,
-        });
+        lines.push(make_header_line(String::new(), LineType::Context));
+        lines.push(make_header_line("Pull Request".to_string(), LineType::Header));
+        lines.push(make_header_line("─".repeat(40), LineType::Info));
+        lines.push(make_header_line(format!("#{} {}", pr.number, pr.title), LineType::Info));
+        lines.push(make_header_line(format!("State: {}", pr.state), LineType::Context));
+        lines.push(make_header_line(format!("Author: {}", pr.author), LineType::Context));
+        lines.push(make_header_line(format!("URL: {}", pr.url), LineType::Context));
 
         if !pr.body.is_empty() {
-            lines.push(DiffLine {
-                text: String::new(),
-                line_type: LineType::Context,
-                left_num: None,
-                right_num: None,
-            });
+            lines.push(make_header_line(String::new(), LineType::Context));
+            lines.push(make_header_line("Description".to_string(), LineType::Header));
             for line in pr.body.lines() {
-                lines.push(DiffLine {
-                    text: line.to_string(),
-                    line_type: LineType::Context,
-                    left_num: None,
-                    right_num: None,
-                });
+                lines.push(make_header_line(format!("  {}", line), LineType::Context));
             }
         }
 
         // Reviews
         if !pr.reviews.is_empty() {
-            lines.push(DiffLine {
-                text: String::new(),
-                line_type: LineType::Context,
-                left_num: None,
-                right_num: None,
-            });
-            lines.push(DiffLine {
-                text: "Reviews".to_string(),
-                line_type: LineType::Header,
-                left_num: None,
-                right_num: None,
-            });
+            lines.push(make_header_line(String::new(), LineType::Context));
+            lines.push(make_header_line("Reviews".to_string(), LineType::Header));
             for review in &pr.reviews {
-                let state_type = match review.state.as_str() {
+                let line_type = match review.state.as_str() {
                     "APPROVED" => LineType::Added,
                     "CHANGES_REQUESTED" => LineType::Removed,
                     _ => LineType::Context,
                 };
-                lines.push(DiffLine {
-                    text: format!("{} - {}", review.author, review.state),
-                    line_type: state_type,
-                    left_num: None,
-                    right_num: None,
-                });
+                lines.push(make_header_line(format!("{} - {}", review.author, review.state), line_type));
                 if !review.body.is_empty() {
                     for line in review.body.lines() {
-                        lines.push(DiffLine {
-                            text: format!("  {}", line),
-                            line_type: LineType::Context,
-                            left_num: None,
-                            right_num: None,
-                        });
+                        lines.push(make_header_line(format!("  {}", line), LineType::Context));
                     }
                 }
             }
         }
     } else {
-        lines.push(DiffLine {
-            text: String::new(),
-            line_type: LineType::Context,
-            left_num: None,
-            right_num: None,
-        });
-        lines.push(DiffLine {
-            text: "No PR found for this branch".to_string(),
-            line_type: LineType::Info,
-            left_num: None,
-            right_num: None,
-        });
+        lines.push(make_header_line(String::new(), LineType::Context));
+        lines.push(make_header_line("No PR found for this branch".to_string(), LineType::Info));
     }
 
     lines
@@ -518,49 +446,101 @@ impl<'a> StatefulWidget for DiffView<'a> {
             .take(inner.height as usize)
             .collect();
 
+        let pane_width = ((inner.width as usize).saturating_sub(3)) / 2; // -3 for separator
+
         for (i, (idx, diff_line)) in visible_lines.into_iter().enumerate() {
             let y = inner.y + i as u16;
             let is_cursor = self.focused && idx == state.cursor;
-            let line = render_diff_line(diff_line, is_cursor, self.colors, inner.width as usize);
+            let line = render_diff_line(diff_line, is_cursor, self.colors, pane_width);
             buf.set_line(inner.x, y, &line, inner.width);
         }
     }
 }
 
-fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, _width: usize) -> Line<'static> {
+fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_width: usize) -> Line<'static> {
     let mut spans = vec![];
 
-    // Line numbers
-    let num_width = 4;
-    if let Some(num) = diff_line.right_num.or(diff_line.left_num) {
-        spans.push(Span::styled(
-            format!("{:>width$} │ ", num, width = num_width),
-            colors.style_muted(),
-        ));
-    } else {
-        spans.push(Span::styled(
-            format!("{:>width$} │ ", "", width = num_width),
-            colors.style_muted(),
-        ));
+    // For headers, render full width
+    if diff_line.is_header {
+        let text = diff_line.left_text.as_deref().unwrap_or("");
+        let style = match diff_line.line_type {
+            LineType::Header => colors.style_header(),
+            LineType::Info => colors.style_muted(),
+            _ => ratatui::style::Style::default().fg(colors.text),
+        };
+        let content_style = if cursor {
+            style.add_modifier(ratatui::style::Modifier::REVERSED)
+        } else {
+            style
+        };
+        spans.push(Span::styled(text.to_string(), content_style));
+        return Line::from(spans);
     }
 
-    // Content
-    let text = diff_line.text.replace('\t', "    ");
-    let style = match diff_line.line_type {
-        LineType::Added => colors.style_added(),
+    let num_width = 4;
+
+    // Left pane
+    let left_num_str = diff_line.left_num
+        .map(|n| format!("{:>width$}", n, width = num_width))
+        .unwrap_or_else(|| " ".repeat(num_width));
+
+    let left_text = diff_line.left_text.as_deref().unwrap_or("");
+    let left_text = left_text.replace('\t', "    ");
+
+    let left_style = match diff_line.line_type {
         LineType::Removed => colors.style_removed(),
-        LineType::Header => colors.style_header(),
-        LineType::Info => colors.style_muted(),
         LineType::Context => ratatui::style::Style::default().fg(colors.text),
+        _ => ratatui::style::Style::default().fg(colors.text),
     };
 
-    let content_style = if cursor {
-        style.add_modifier(ratatui::style::Modifier::REVERSED)
+    let content_width = pane_width.saturating_sub(num_width + 3); // -3 for " │ "
+    let left_content = truncate_or_pad(&left_text, content_width);
+
+    // Right pane
+    let right_num_str = diff_line.right_num
+        .map(|n| format!("{:>width$}", n, width = num_width))
+        .unwrap_or_else(|| " ".repeat(num_width));
+
+    let right_text = diff_line.right_text.as_deref().unwrap_or("");
+    let right_text = right_text.replace('\t', "    ");
+
+    let right_style = match diff_line.line_type {
+        LineType::Added => colors.style_added(),
+        LineType::Context => ratatui::style::Style::default().fg(colors.text),
+        _ => ratatui::style::Style::default().fg(colors.text),
+    };
+
+    let right_content = truncate_or_pad(&right_text, content_width);
+
+    // Apply cursor highlight
+    let left_style = if cursor {
+        left_style.add_modifier(ratatui::style::Modifier::REVERSED)
     } else {
-        style
+        left_style
+    };
+    let right_style = if cursor {
+        right_style.add_modifier(ratatui::style::Modifier::REVERSED)
+    } else {
+        right_style
     };
 
-    spans.push(Span::styled(text, content_style));
+    // Build line: left_num │ left_content │ right_num │ right_content
+    spans.push(Span::styled(left_num_str, colors.style_muted()));
+    spans.push(Span::styled(" │ ", colors.style_muted()));
+    spans.push(Span::styled(left_content, left_style));
+    spans.push(Span::styled(" │ ", colors.style_muted()));
+    spans.push(Span::styled(right_num_str, colors.style_muted()));
+    spans.push(Span::styled(" │ ", colors.style_muted()));
+    spans.push(Span::styled(right_content, right_style));
 
     Line::from(spans)
+}
+
+fn truncate_or_pad(s: &str, width: usize) -> String {
+    let char_count = s.chars().count();
+    if char_count > width {
+        s.chars().take(width.saturating_sub(1)).collect::<String>() + "…"
+    } else {
+        format!("{:width$}", s, width = width)
+    }
 }

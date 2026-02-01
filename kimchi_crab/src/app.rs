@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
-use std::process::Command;
+use std::time::{Duration, Instant};
 
 use crate::config::Config;
 use crate::event::KeyInput;
@@ -43,6 +43,13 @@ impl FocusedWindow {
     }
 }
 
+/// Command to execute after handling input
+#[derive(Debug, Clone)]
+pub enum AppCommand {
+    None,
+    OpenEditor { path: String, line: Option<usize> },
+}
+
 /// Main application state
 pub struct App {
     // Core
@@ -55,6 +62,7 @@ pub struct App {
     pub mode: AppMode,
     pub focused: FocusedWindow,
     pub show_help: bool,
+    pub pending_command: AppCommand,
 
     // Data
     pub branch: String,
@@ -63,6 +71,7 @@ pub struct App {
     pub commits: Vec<Commit>,
     pub diff_stats: DiffStats,
     pub pr: Option<PrInfo>,
+    last_pr_poll: Instant,
 
     // Widget states
     pub file_list_state: FileListState,
@@ -86,12 +95,14 @@ impl App {
             mode: AppMode::default(),
             focused: FocusedWindow::FileList,
             show_help: false,
+            pending_command: AppCommand::None,
             branch,
             base_branch,
             files: vec![],
             commits: vec![],
             diff_stats: DiffStats::default(),
             pr: None,
+            last_pr_poll: Instant::now(),
             file_list_state: FileListState::new(),
             commit_list_state: CommitListState::new(),
             diff_view_state: DiffViewState::new(),
@@ -124,25 +135,47 @@ impl App {
         self.file_list_state.set_files(self.files.clone());
         self.commit_list_state.set_commits(self.commits.clone());
 
-        // Load PR info if available
+        // Load PR info if available (initial load only, refresh_pr handles polling)
         if self.github.is_available() && self.pr.is_none() {
-            self.pr = self.github.get_pr_for_branch(&self.branch).ok().flatten();
-
-            // Update file comments
-            if let Some(pr) = &self.pr {
-                let comments: HashMap<String, bool> = pr
-                    .file_comments
-                    .keys()
-                    .map(|k| (k.clone(), true))
-                    .collect();
-                self.file_list_state.set_comments(comments);
-            }
+            self.refresh_pr();
         }
 
         // Update preview
         self.update_preview();
 
         Ok(())
+    }
+
+    /// Refresh PR info from GitHub
+    pub fn refresh_pr(&mut self) {
+        if !self.github.is_available() {
+            return;
+        }
+
+        if let Ok(Some(pr)) = self.github.get_pr_for_branch(&self.branch) {
+            // Update file comments indicator
+            let comments: HashMap<String, bool> = pr
+                .file_comments
+                .keys()
+                .map(|k| (k.clone(), true))
+                .collect();
+            self.file_list_state.set_comments(comments);
+            self.pr = Some(pr);
+
+            // Update preview if showing commit
+            self.update_preview();
+        }
+
+        self.last_pr_poll = Instant::now();
+    }
+
+    /// Handle tick event - periodic updates
+    pub fn handle_tick(&mut self) {
+        const PR_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+        if self.last_pr_poll.elapsed() >= PR_POLL_INTERVAL {
+            self.refresh_pr();
+        }
     }
 
     /// Handle key input
@@ -388,20 +421,42 @@ impl App {
         }
     }
 
-    fn open_in_editor(&self) {
-        let path = if let Some(entry) = self.file_list_state.selected() {
-            if entry.is_dir {
-                return;
+    fn open_in_editor(&mut self) {
+        let (path, line) = match self.focused {
+            FocusedWindow::Preview => {
+                // Get line number from diff view
+                let line = self.diff_view_state.get_current_line_number();
+                if let Some(entry) = self.file_list_state.selected() {
+                    if entry.is_dir {
+                        return;
+                    }
+                    (entry.path.clone(), line)
+                } else {
+                    return;
+                }
             }
-            entry.path.clone()
-        } else {
-            return;
+            _ => {
+                if let Some(entry) = self.file_list_state.selected() {
+                    if entry.is_dir {
+                        return;
+                    }
+                    (entry.path.clone(), None)
+                } else {
+                    return;
+                }
+            }
         };
 
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
         let full_path = self.git.path().join(&path);
+        self.pending_command = AppCommand::OpenEditor {
+            path: full_path.to_string_lossy().to_string(),
+            line,
+        };
+    }
 
-        let _ = Command::new(&editor).arg(&full_path).status();
+    /// Take pending command (clears it)
+    pub fn take_command(&mut self) -> AppCommand {
+        std::mem::replace(&mut self.pending_command, AppCommand::None)
     }
 
     /// Render the UI

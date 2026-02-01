@@ -198,7 +198,31 @@ impl GitClient {
         opts.pathspec(path);
 
         let diff = self.repo.diff_index_to_workdir(None, Some(&mut opts))?;
-        self.diff_to_string(&diff)
+        let result = self.diff_to_string(&diff)?;
+
+        // If no diff output, file might be untracked - show as new file
+        if result.is_empty() {
+            return self.format_new_file(path);
+        }
+        Ok(result)
+    }
+
+    fn format_new_file(&self, path: &str) -> Result<String> {
+        let content = self.read_file(path)?;
+        let lines: Vec<&str> = content.lines().collect();
+        let line_count = lines.len();
+
+        let mut result = format!("diff --git a/{} b/{}\n", path, path);
+        result.push_str("new file\n");
+        result.push_str(&format!("@@ -0,0 +1,{} @@\n", line_count));
+
+        for line in lines {
+            result.push('+');
+            result.push_str(line);
+            result.push('\n');
+        }
+
+        Ok(result)
     }
 
     fn branch_diff(&self, path: &str) -> Result<String> {
@@ -214,7 +238,13 @@ impl GitClient {
         opts.pathspec(path);
 
         let diff = self.repo.diff_tree_to_workdir(Some(&base_tree), Some(&mut opts))?;
-        self.diff_to_string(&diff)
+        let result = self.diff_to_string(&diff)?;
+
+        // If no diff output, file might be new - show as new file
+        if result.is_empty() {
+            return self.format_new_file(path);
+        }
+        Ok(result)
     }
 
     /// Get combined diff for multiple files

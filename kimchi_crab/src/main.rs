@@ -15,9 +15,10 @@ use crossterm::{
 use ratatui::prelude::*;
 use std::io;
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::Duration;
 
-use app::App;
+use app::{App, AppCommand};
 use event::{AppEvent, EventHandler};
 
 /// Kimchi - AI-native code review TUI
@@ -64,7 +65,7 @@ fn main() -> Result<()> {
     result
 }
 
-fn run_app<B: Backend>(
+fn run_app<B: Backend + io::Write>(
     terminal: &mut Terminal<B>,
     app: &mut App,
     events: &EventHandler,
@@ -84,13 +85,75 @@ fn run_app<B: Backend>(
                 // Terminal will redraw automatically
             }
             AppEvent::Tick => {
-                // Could do periodic refresh here
+                app.handle_tick();
             }
             AppEvent::FileChanged => {
                 app.refresh()?;
             }
             AppEvent::PrLoaded => {
                 // PR data updated
+            }
+        }
+
+        // Handle pending commands
+        match app.take_command() {
+            AppCommand::None => {}
+            AppCommand::OpenEditor { path, line } => {
+                // Pause event polling first
+                events.pause();
+
+                // Suspend terminal
+                disable_raw_mode()?;
+                execute!(
+                    terminal.backend_mut(),
+                    LeaveAlternateScreen,
+                    DisableMouseCapture
+                )?;
+                terminal.show_cursor()?;
+
+                // Run editor
+                let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
+                let mut cmd = Command::new(&editor);
+
+                // Add line number argument if available (works for vim, nvim, hx, etc.)
+                if let Some(line_num) = line {
+                    if editor.contains("vim") || editor.contains("nvim") {
+                        cmd.arg(format!("+{}", line_num));
+                    } else if editor.contains("hx") || editor.contains("helix") {
+                        // Helix uses file:line format
+                        cmd.arg(format!("{}:{}", path, line_num));
+                    } else {
+                        cmd.arg(&path);
+                    }
+                    if !editor.contains("hx") && !editor.contains("helix") {
+                        cmd.arg(&path);
+                    }
+                } else {
+                    cmd.arg(&path);
+                }
+
+                // Run with proper stdio inheritance
+                let _ = cmd
+                    .stdin(std::process::Stdio::inherit())
+                    .stdout(std::process::Stdio::inherit())
+                    .stderr(std::process::Stdio::inherit())
+                    .status();
+
+                // Resume terminal
+                enable_raw_mode()?;
+                execute!(
+                    terminal.backend_mut(),
+                    EnterAlternateScreen,
+                    EnableMouseCapture
+                )?;
+                terminal.hide_cursor()?;
+                terminal.clear()?;
+
+                // Resume event polling
+                events.resume();
+
+                // Refresh after returning from editor
+                app.refresh()?;
             }
         }
     }

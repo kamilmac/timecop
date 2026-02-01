@@ -256,6 +256,16 @@ fn flatten_tree(
             vec![]
         };
 
+        // Check if this node or any children have comments
+        let node_has_comments = if node.is_dir {
+            // For directories, check if any child file has comments
+            children.iter().any(|child_path| {
+                has_comments.get(child_path).copied().unwrap_or(false)
+            })
+        } else {
+            has_comments.get(&node.path).copied().unwrap_or(false)
+        };
+
         entries.push(TreeEntry {
             display: node.name.clone(),
             path: node.path.clone(),
@@ -265,7 +275,7 @@ fn flatten_tree(
             status: node.status,
             collapsed: is_collapsed,
             children,
-            has_comments: has_comments.get(&node.path).copied().unwrap_or(false),
+            has_comments: node_has_comments,
         });
 
         // Recurse into children if not collapsed

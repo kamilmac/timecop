@@ -1,6 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
-use std::sync::mpsc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::Duration;
 
@@ -23,18 +24,32 @@ pub enum AppEvent {
 pub struct EventHandler {
     rx: mpsc::Receiver<AppEvent>,
     _tx: mpsc::Sender<AppEvent>,
+    paused: Arc<AtomicBool>,
 }
 
 impl EventHandler {
     pub fn new(tick_rate: Duration) -> Self {
         let (tx, rx) = mpsc::channel();
         let event_tx = tx.clone();
+        let paused = Arc::new(AtomicBool::new(false));
+        let paused_clone = paused.clone();
 
         // Spawn event polling thread
         thread::spawn(move || {
             loop {
+                // Check if paused
+                if paused_clone.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+
                 // Poll for events with timeout
                 if event::poll(tick_rate).unwrap_or(false) {
+                    // Double-check we're not paused before reading
+                    if paused_clone.load(Ordering::Relaxed) {
+                        continue;
+                    }
+
                     if let Ok(event) = event::read() {
                         let app_event = match event {
                             Event::Key(key) => Some(AppEvent::Key(key)),
@@ -49,15 +64,17 @@ impl EventHandler {
                         }
                     }
                 } else {
-                    // Send tick on timeout
-                    if event_tx.send(AppEvent::Tick).is_err() {
-                        break;
+                    // Send tick on timeout (only if not paused)
+                    if !paused_clone.load(Ordering::Relaxed) {
+                        if event_tx.send(AppEvent::Tick).is_err() {
+                            break;
+                        }
                     }
                 }
             }
         });
 
-        Self { rx, _tx: tx }
+        Self { rx, _tx: tx, paused }
     }
 
     /// Get the next event (blocking)
@@ -68,6 +85,18 @@ impl EventHandler {
     /// Try to get the next event (non-blocking)
     pub fn try_next(&self) -> Option<AppEvent> {
         self.rx.try_recv().ok()
+    }
+
+    /// Pause event polling (for spawning external processes)
+    pub fn pause(&self) {
+        self.paused.store(true, Ordering::Relaxed);
+        // Give the polling thread time to stop
+        thread::sleep(Duration::from_millis(150));
+    }
+
+    /// Resume event polling
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::Relaxed);
     }
 }
 
