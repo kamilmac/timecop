@@ -1,5 +1,5 @@
 # Binary
-blocks
+kimchi
 
 # IDE
 .idea/
@@ -12,4 +12,3 @@ blocks
 
 # Test coverage
 coverage.out
-kimchi
