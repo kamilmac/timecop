@@ -284,8 +284,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case GitChangedMsg:
-		// File system changed, refresh data
-		return a, tea.Batch(a.loadBranchInfo(), a.loadFiles(), a.loadDiff(), a.loadDiffStats())
+		// File system changed, refresh data (including PR for branch switches)
+		return a, tea.Batch(a.loadBranchInfo(), a.loadFiles(), a.loadDiff(), a.loadDiffStats(), a.loadPR())
 
 	case PRLoadedMsg:
 		if msg.Err != nil {
@@ -296,6 +296,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update windows with new PR data
 		a.fileList.SetPR(a.state.PR)
 		a.diffView.SetPR(a.state.PR)
+		// If viewing root/PR summary, refresh the view
+		if a.state.IsRootSelected {
+			a.diffView.SetFolderContent("", "", true, a.state.PR)
+		}
 		return a, nil
 
 	case FolderDiffLoadedMsg:
