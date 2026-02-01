@@ -396,6 +396,16 @@ func (d *DiffView) renderSideBySide(content string) string {
 		return d.styleUnifiedDiff(content)
 	}
 
+	// Build comments map by line number
+	commentsByLine := make(map[int][]github.LineComment)
+	if d.pr != nil && d.filePath != "" {
+		if comments, ok := d.pr.FileComments[d.filePath]; ok {
+			for _, c := range comments {
+				commentsByLine[c.Line] = append(commentsByLine[c.Line], c)
+			}
+		}
+	}
+
 	lines := strings.Split(content, "\n")
 	var result []string
 
@@ -442,6 +452,12 @@ func (d *DiffView) renderSideBySide(content string) string {
 			left := d.formatSideLine(leftNum, text, lineContext, numWidth, paneWidth)
 			right := d.formatSideLine(rightNum, text, lineContext, numWidth, paneWidth)
 			result = append(result, left+d.styles.Muted.Render(" │ ")+right)
+			// Add comments for this line
+			if comments, ok := commentsByLine[rightNum]; ok {
+				for _, c := range comments {
+					result = append(result, d.renderComment(c)...)
+				}
+			}
 			leftNum++
 			rightNum++
 			i++
@@ -465,6 +481,7 @@ func (d *DiffView) renderSideBySide(content string) string {
 		maxLen := max(len(removals), len(additions))
 		for j := 0; j < maxLen; j++ {
 			var left, right string
+			var currentRightNum int
 
 			if j < len(removals) {
 				left = d.formatSideLine(leftNum, removals[j], lineRemoved, numWidth, paneWidth)
@@ -474,6 +491,7 @@ func (d *DiffView) renderSideBySide(content string) string {
 			}
 
 			if j < len(additions) {
+				currentRightNum = rightNum
 				right = d.formatSideLine(rightNum, additions[j], lineAdded, numWidth, paneWidth)
 				rightNum++
 			} else {
@@ -481,6 +499,15 @@ func (d *DiffView) renderSideBySide(content string) string {
 			}
 
 			result = append(result, left+d.styles.Muted.Render(" │ ")+right)
+
+			// Add comments for the new line
+			if currentRightNum > 0 {
+				if comments, ok := commentsByLine[currentRightNum]; ok {
+					for _, c := range comments {
+						result = append(result, d.renderComment(c)...)
+					}
+				}
+			}
 		}
 	}
 
