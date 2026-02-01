@@ -1,4 +1,5 @@
 mod app;
+mod async_loader;
 mod config;
 mod event;
 mod git;
@@ -32,6 +33,9 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    // Initialize logging (controlled by RUST_LOG env var)
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
     let args = Args::parse();
 
     // Resolve path

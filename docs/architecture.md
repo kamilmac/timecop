@@ -13,6 +13,7 @@ Kimchi is a terminal UI for code review built with Rust and Ratatui.
 │                                                                                  │
 │  Responsibilities:                                                               │
 │  ├── Terminal setup (raw mode, alternate screen)                                │
+│  ├── Logger initialization (env_logger)                                         │
 │  ├── Create App and EventHandler                                                │
 │  └── Run main event loop                                                        │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -27,13 +28,13 @@ Kimchi is a terminal UI for code review built with Rust and Ratatui.
 │  ├── rx: Receiver       │    │  ├── mode: AppMode                               │
 │  ├── paused: AtomicBool │    │  ├── focused: FocusedWindow                      │
 │  └── watcher: Debouncer │    │  ├── files: Vec<StatusEntry>                     │
-│                         │    │  ├── commits: Vec<Commit>                        │
-│  Methods:               │    │  ├── pr: Option<PrInfo>                          │
+│                         │    │  ├── selected_pr: Option<PrInfo>                 │
+│  Methods:               │    │  ├── async_loader: AsyncLoader                   │
 │  ├── next() → AppEvent  │    │  └── *_state: widget states                      │
 │  ├── pause()            │    │                                                  │
 │  └── resume()           │    │  Methods:                                        │
 │                         │    │  ├── handle_key() → updates state                │
-└─────────────────────────┘    │  ├── handle_tick() → async loading               │
+└─────────────────────────┘    │  ├── handle_tick() → poll async loaders          │
          │                     │  ├── refresh() → reload git data                 │
          │ sends               │  └── render() → draw UI                          │
          ▼                     └─────────────────────────────────────────────────┘
@@ -41,19 +42,30 @@ Kimchi is a terminal UI for code review built with Rust and Ratatui.
     ├── Key(KeyEvent)                   │ uses
     ├── Tick                            ▼
     ├── FileChanged          ┌─────────────────────────────────────────────────────┐
-    └── Resize               │                    Clients                          │
+    └── Resize               │                    Modules                          │
                              │                                                     │
                              │  ┌─────────────────┐    ┌─────────────────────────┐ │
                              │  │   GitClient     │    │    GitHubClient         │ │
                              │  │ (src/git/)      │    │  (src/github/)          │ │
                              │  │                 │    │                         │ │
-                             │  │ • status()      │    │ • get_pr_for_branch()   │ │
-                             │  │ • diff()        │    │ • get_reviews()         │ │
-                             │  │ • log()         │    │ • get_comments()        │ │
-                             │  │ • read_file()   │    │                         │ │
+                             │  │ • status()      │    │ • list_open_prs()       │ │
+                             │  │ • diff()        │    │ • get_pr_by_number()    │ │
+                             │  │ • log()         │    │ • approve_pr()          │ │
+                             │  │ • read_file()   │    │ • request_changes()     │ │
+                             │  │                 │    │ • comment_pr()          │ │
+                             │  │ Uses: libgit2   │    │ • add_line_comment()    │ │
                              │  │                 │    │  Uses: gh CLI           │ │
-                             │  │ Uses: libgit2   │    │                         │ │
                              │  └─────────────────┘    └─────────────────────────┘ │
+                             │                                                     │
+                             │  ┌─────────────────────────────────────────────────┐│
+                             │  │   AsyncLoader (src/async_loader.rs)             ││
+                             │  │                                                 ││
+                             │  │   Manages background loading:                   ││
+                             │  │   ├── load_stats() → DiffStats                  ││
+                             │  │   ├── load_pr_list() → Vec<PrSummary>           ││
+                             │  │   ├── load_pr_details() → PrInfo                ││
+                             │  │   └── poll_*() → check for completed loads      ││
+                             │  └─────────────────────────────────────────────────┘│
                              └─────────────────────────────────────────────────────┘
 ```
 
@@ -71,6 +83,7 @@ Kimchi is a terminal UI for code review built with Rust and Ratatui.
      │                 │───────────────────>│                    │
      │                 │                    │                    │
      │                 │                    │ handle_key()       │
+     │                 │                    │ ─ check modals     │
      │                 │                    │ ─ check global keys│
      │                 │                    │ ─ delegate to      │
      │                 │                    │   focused window   │
@@ -88,27 +101,38 @@ Kimchi is a terminal UI for code review built with Rust and Ratatui.
 
 ```
 ┌─────────────────┐                      ┌─────────────────┐
-│                 │   spawn_stats_loader │                 │
-│   Main Thread   │ ──────────────────►  │ Background      │
-│   (App)         │                      │ Thread          │
-│                 │ ◄──────────────────  │                 │
-│                 │   mpsc::channel      │ • GitClient     │
-│                 │                      │ • diff_stats()  │
+│                 │   AsyncLoader        │                 │
+│   Main Thread   │   .load_stats()      │ Background      │
+│   (App)         │ ──────────────────►  │ Thread          │
+│                 │                      │                 │
+│                 │ ◄──────────────────  │ • GitClient     │
+│                 │   poll_stats()       │ • diff_stats()  │
 └─────────────────┘                      └─────────────────┘
 
 ┌─────────────────┐                      ┌─────────────────┐
-│                 │   spawn_pr_loader    │                 │
-│   Main Thread   │ ──────────────────►  │ Background      │
-│   (App)         │                      │ Thread          │
-│                 │ ◄──────────────────  │                 │
-│                 │   mpsc::channel      │ • GitHubClient  │
-│                 │                      │ • gh CLI        │
+│                 │   AsyncLoader        │                 │
+│   Main Thread   │   .load_pr_list()    │ Background      │
+│   (App)         │ ──────────────────►  │ Thread          │
+│                 │                      │                 │
+│                 │ ◄──────────────────  │ • GitHubClient  │
+│                 │   poll_pr_list()     │ • gh CLI        │
 └─────────────────┘                      └─────────────────┘
 
+┌─────────────────┐                      ┌─────────────────┐
+│                 │   AsyncLoader        │                 │
+│   Main Thread   │   .load_pr_details() │ Background      │
+│   (App)         │ ──────────────────►  │ Thread          │
+│                 │                      │                 │
+│                 │ ◄──────────────────  │ • PR details    │
+│                 │   poll_pr_details()  │ • Reviews       │
+└─────────────────┘                      │ • Comments      │
+                                         └─────────────────┘
+
 On each Tick:
-  1. try_recv() on stats_rx → apply DiffStats if ready
-  2. try_recv() on pr_rx → apply PrInfo if ready
-  3. Trigger new loaders if needed
+  1. poll_stats() → apply DiffStats if ready
+  2. poll_pr_list() → apply PR list if ready
+  3. poll_pr_details() → apply PrInfo if ready
+  4. Trigger new loaders if needed (e.g., PR poll interval)
 ```
 
 ## UI Widget Hierarchy
@@ -126,14 +150,15 @@ On each Tick:
 │  │  • Directory collapse   │  │  ├── FileDiff (side-by-side)                │   │
 │  │  • Status indicators    │  │  ├── FolderDiff (combined)                  │   │
 │  │                         │  │  ├── FileContent (browse mode)              │   │
-│  ├─────────────────────────┤  │  ├── CommitSummary (PR info)                │   │
-│  │                         │  │  └── Empty                                  │   │
-│  │      CommitList         │  │                                             │   │
-│  │  (commit_list.rs)       │  │                                             │   │
-│  │                         │  │                                             │   │
-│  │  • Recent commits       │  │                                             │   │
-│  │  • Short hash + subject │  │                                             │   │
-│  │                         │  │                                             │   │
+│  ├─────────────────────────┤  │  ├── PrDetails (PR info view)               │   │
+│  │                         │  │  ├── Loading (loading state)                │   │
+│  │     PrListPanel         │  │  └── Empty                                  │   │
+│  │  (pr_info.rs)           │  │                                             │   │
+│  │                         │  │  Syntax highlighting via Syntect            │   │
+│  │  • Open PRs list        │  │                                             │   │
+│  │  • 2-line per PR format │  │                                             │   │
+│  │  • Review indicators    │  │                                             │   │
+│  │  • Current branch mark  │  │                                             │   │
 │  └─────────────────────────┘  └─────────────────────────────────────────────┘   │
 │                                                                                  │
 │  ┌─────────────────────────────────────────────────────────────────────────────┐│
@@ -145,7 +170,48 @@ On each Tick:
 │  │                           HelpModal (overlay)                                ││
 │  │                         (help.rs, toggled with ?)                           ││
 │  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                          InputModal (overlay)                                ││
+│  │                    (input_modal.rs, for PR actions)                         ││
+│  │                                                                              ││
+│  │  ReviewAction:                                                               ││
+│  │  ├── Approve (confirmation: y/n)                                            ││
+│  │  ├── RequestChanges (text input)                                            ││
+│  │  ├── Comment (text input)                                                   ││
+│  │  └── LineComment (text input with file:line context)                        ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## Module Structure
+
+```
+src/
+├── main.rs              # Entry point, terminal setup, event loop
+├── app.rs               # Main application state and logic (~700 lines)
+├── async_loader.rs      # Background data loading management
+├── event.rs             # Event handling (keyboard, file watching, ticks)
+├── config.rs            # Configuration, colors, layout settings
+├── git/
+│   ├── mod.rs           # Git module exports
+│   ├── types.rs         # Git data structures (FileStatus, DiffMode, AppMode)
+│   └── client.rs        # Git operations using libgit2
+├── github/
+│   └── mod.rs           # GitHub API client using gh CLI (~500 lines)
+│                        # Includes PR listing, details, and review actions
+└── ui/
+    ├── mod.rs           # UI module exports
+    ├── layout.rs        # Layout computation (responsive grid)
+    ├── syntax.rs        # Syntax highlighting with Syntect
+    └── widgets/
+        ├── mod.rs
+        ├── diff_parser.rs   # Diff parsing utilities (extracted from diff_view)
+        ├── diff_view.rs     # Diff/content preview widget
+        ├── file_list.rs     # Tree view widget
+        ├── help.rs          # Help modal widget
+        ├── input_modal.rs   # Review action input modal
+        └── pr_info.rs       # PR list panel widget
 ```
 
 ## File Watcher Flow
@@ -218,26 +284,65 @@ On each Tick:
              │
              ▼
     ╔════════════════════╗
-   ╱  show_help == true? ╲
+   ╱  InputModal visible? ╲
   ╱                       ╲
  yes                      no
   │                        │
   ▼                        ▼
 ┌────────────────┐   ╔═══════════════╗
-│ Only handle    │  ╱ Global key?    ╲
-│ ? or Esc       │ ╱  (q, ?, r, Tab,  ╲
-│ to close help  │╱   m, 1-4, y, o)   ╲
-└────────────────┘yes                  no
-                   │                    │
-                   ▼                    ▼
-          ┌──────────────┐    ┌──────────────────┐
-          │ Handle       │    │ Delegate to      │
-          │ globally:    │    │ focused window:  │
-          │ • quit       │    │                  │
-          │ • mode switch│    │ • FileList keys  │
-          │ • yank/open  │    │ • CommitList keys│
-          │ • refresh    │    │ • Preview keys   │
-          └──────────────┘    └──────────────────┘
+│ Handle modal:  │  ╱ show_help?     ╲
+│ • y/n confirm  │ ╱                  ╲
+│ • text input   │yes                 no
+│ • Enter submit │  │                  │
+│ • Esc cancel   │  ▼                  ▼
+└────────────────┘ ┌────────────┐  ╔════════════════╗
+                   │ Only handle│ ╱ Global key?     ╲
+                   │ ? or Esc   │╱  (q, ?, r, Tab,   ╲
+                   │ to close   │╱   m, 1-4, y, o)   ╲
+                   └────────────┘yes                  no
+                                 │                    │
+                                 ▼                    ▼
+                        ┌──────────────┐    ┌──────────────────┐
+                        │ Handle       │    │ Delegate to      │
+                        │ globally:    │    │ focused window:  │
+                        │ • quit       │    │                  │
+                        │ • mode switch│    │ • FileList keys  │
+                        │ • yank/open  │    │ • PrList keys    │
+                        │ • refresh    │    │   (a, x, c)      │
+                        └──────────────┘    │ • Preview keys   │
+                                            └──────────────────┘
+```
+
+## PR Review Flow
+
+```
+┌──────────┐    ┌──────────────┐    ┌─────────────────┐    ┌──────────────┐
+│  User    │    │   PrList     │    │   InputModal    │    │  GitHub CLI  │
+└────┬─────┘    │   focused    │    └────────┬────────┘    └──────┬───────┘
+     │          └──────┬───────┘             │                    │
+     │                 │                     │                    │
+     │ press 'a'       │                     │                    │
+     │────────────────>│                     │                    │
+     │                 │                     │                    │
+     │                 │ show Approve modal  │                    │
+     │                 │────────────────────>│                    │
+     │                 │                     │                    │
+     │ press 'y'       │                     │                    │
+     │────────────────>│────────────────────>│                    │
+     │                 │                     │                    │
+     │                 │                     │ gh pr review       │
+     │                 │                     │ --approve          │
+     │                 │                     │───────────────────>│
+     │                 │                     │                    │
+     │                 │                     │   success/error    │
+     │                 │                     │<───────────────────│
+     │                 │                     │                    │
+     │                 │ hide modal          │                    │
+     │                 │<────────────────────│                    │
+     │                 │                     │                    │
+     │                 │ reload PR details   │                    │
+     │                 │───────────────────────────────────────-->│
+     │                 │                     │                    │
 ```
 
 ## External Editor Integration
@@ -278,3 +383,23 @@ On each Tick:
             │ 4. Refresh data │
             └─────────────────┘
 ```
+
+## Logging
+
+Application logging is configured via the `RUST_LOG` environment variable:
+
+```bash
+# Default: warnings only
+kimchi
+
+# Enable debug logging
+RUST_LOG=debug kimchi
+
+# Enable trace logging for async_loader
+RUST_LOG=kimchi::async_loader=trace kimchi
+```
+
+Log messages are written to stderr and include:
+- Background task failures (PR loading, stats loading)
+- GitHub CLI errors
+- Git operation errors

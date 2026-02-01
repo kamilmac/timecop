@@ -38,6 +38,7 @@ pub struct Colors {
     pub status_bar: Color,
     pub status_bar_text: Color,
     pub comment: Color,
+    pub comment_bg: Color,
 }
 
 impl Default for Colors {
@@ -61,6 +62,7 @@ impl Default for Colors {
             status_bar: Color::Rgb(49, 50, 68),    // Surface0
             status_bar_text: Color::Rgb(205, 214, 244), // Text
             comment: Color::Rgb(249, 226, 175),   // Yellow for PR comments
+            comment_bg: Color::Rgb(45, 40, 30),     // Warm dark background for comments
         }
     }
 }
@@ -133,6 +135,10 @@ pub struct Layout {
     pub max_commits: usize,
     /// In browse/docs mode, collapse folders at this depth and below (0 = root collapsed, 1 = first level collapsed)
     pub browse_collapse_depth: usize,
+    /// Width at which to wrap inline comments in diff view
+    pub comment_wrap_width: usize,
+    /// Separator width between left and right diff panes
+    pub diff_separator_width: usize,
 }
 
 impl Default for Layout {
@@ -146,6 +152,8 @@ impl Default for Layout {
             diff_tab_width: 4,
             max_commits: 8,
             browse_collapse_depth: 2, // Collapse folders at depth 2+
+            comment_wrap_width: 120,
+            diff_separator_width: 3, // " │ "
         }
     }
 }
