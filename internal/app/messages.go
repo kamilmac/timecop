@@ -100,3 +100,8 @@ type FileContentLoadedMsg struct {
 type CommitsLoadedMsg struct {
 	Commits []git.Commit
 }
+
+// CommitSelectedMsg is sent when a commit is selected
+type CommitSelectedMsg struct {
+	Commit git.Commit
+}

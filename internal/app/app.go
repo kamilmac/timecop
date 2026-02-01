@@ -116,6 +116,13 @@ func New(gitClient git.Client) *App {
 		}
 	})
 
+	// Set commit selection callback
+	commitList.SetOnSelect(func(commit git.Commit) tea.Cmd {
+		return func() tea.Msg {
+			return CommitSelectedMsg{Commit: commit}
+		}
+	})
+
 	return app
 }
 
@@ -292,6 +299,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.commitList.SetCommits(msg.Commits)
 		return a, nil
 
+	case CommitSelectedMsg:
+		// When commit is selected, show PR summary in diff view
+		a.state.SelectedFile = ""
+		a.state.SelectedFolder = ""
+		a.state.IsRootSelected = true
+		a.diffView.SetFolderContent("", "", true, a.state.PR)
+		return a, nil
+
 	case DiffLoadedMsg:
 		a.state.Diff = msg.Content
 		a.diffView.SetContent(msg.Content, a.state.SelectedFile)
@@ -369,6 +384,8 @@ func (a *App) delegateToFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch a.state.FocusedWindow {
 	case config.WindowFileList:
 		_, cmd = a.fileList.Update(msg)
+	case config.WindowCommitList:
+		_, cmd = a.commitList.Update(msg)
 	case config.WindowDiffView:
 		_, cmd = a.diffView.Update(msg)
 	case config.WindowFileView:
@@ -381,13 +398,14 @@ func (a *App) delegateToFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a *App) cycleFocus(reverse bool) {
 	// Use the current preview window in the cycle
 	previewWindow := a.getPreviewWindow()
-	windowOrder := []string{config.WindowFileList, previewWindow}
+	windowOrder := []string{config.WindowFileList, config.WindowCommitList, previewWindow}
 	a.state.CycleWindow(windowOrder, reverse)
 	a.updateFocus()
 }
 
 func (a *App) updateFocus() {
 	a.fileList.SetFocus(a.state.FocusedWindow == config.WindowFileList)
+	a.commitList.SetFocus(a.state.FocusedWindow == config.WindowCommitList)
 	a.diffView.SetFocus(a.state.FocusedWindow == config.WindowDiffView)
 	a.fileView.SetFocus(a.state.FocusedWindow == config.WindowFileView)
 }

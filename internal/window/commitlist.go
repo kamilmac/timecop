@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kmacinski/blocks/internal/config"
@@ -13,10 +14,11 @@ import (
 // CommitList displays recent commits
 type CommitList struct {
 	Base
-	commits []git.Commit
-	cursor  int
-	width   int
-	height  int
+	commits  []git.Commit
+	cursor   int
+	width    int
+	height   int
+	onSelect func(commit git.Commit) tea.Cmd
 }
 
 // NewCommitList creates a new commit list window
@@ -34,10 +36,51 @@ func (c *CommitList) SetCommits(commits []git.Commit) {
 	}
 }
 
+// SetOnSelect sets the callback for commit selection
+func (c *CommitList) SetOnSelect(fn func(commit git.Commit) tea.Cmd) {
+	c.onSelect = fn
+}
+
+// SelectedCommit returns the currently selected commit
+func (c *CommitList) SelectedCommit() *git.Commit {
+	if c.cursor >= 0 && c.cursor < len(c.commits) {
+		return &c.commits[c.cursor]
+	}
+	return nil
+}
+
 // Update handles input
 func (c *CommitList) Update(msg tea.Msg) (Window, tea.Cmd) {
-	// Commits window is read-only for now
+	if !c.focused {
+		return c, nil
+	}
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, config.DefaultKeyMap.Down):
+			if c.cursor < len(c.commits)-1 {
+				c.cursor++
+				return c, c.triggerSelect()
+			}
+		case key.Matches(msg, config.DefaultKeyMap.Up):
+			if c.cursor > 0 {
+				c.cursor--
+				return c, c.triggerSelect()
+			}
+		case key.Matches(msg, config.DefaultKeyMap.Enter):
+			return c, c.triggerSelect()
+		}
+	}
+
 	return c, nil
+}
+
+func (c *CommitList) triggerSelect() tea.Cmd {
+	if c.onSelect != nil && c.cursor >= 0 && c.cursor < len(c.commits) {
+		return c.onSelect(c.commits[c.cursor])
+	}
+	return nil
 }
 
 // View renders the commit list
@@ -66,7 +109,8 @@ func (c *CommitList) View(width, height int) string {
 
 		for i := 0; i < maxCommits; i++ {
 			commit := c.commits[i]
-			line := c.formatCommit(commit, contentWidth)
+			isSelected := c.focused && i == c.cursor
+			line := c.formatCommit(commit, contentWidth, isSelected)
 			lines = append(lines, line)
 		}
 	}
@@ -91,13 +135,19 @@ func (c *CommitList) View(width, height int) string {
 }
 
 // formatCommit formats a single commit line
-func (c *CommitList) formatCommit(commit git.Commit, width int) string {
-	// Format: hash subject
+func (c *CommitList) formatCommit(commit git.Commit, width int, selected bool) string {
+	// Format: cursor hash subject
+	cursor := " "
+	if selected {
+		cursor = config.TreeCursor
+	}
+
 	hash := c.styles.Muted.Render(commit.Hash[:7])
 
 	// Calculate available space for subject
-	hashWidth := 8 // 7 chars + space
-	subjectWidth := width - hashWidth
+	cursorWidth := 2 // cursor + space
+	hashWidth := 8   // 7 chars + space
+	subjectWidth := width - cursorWidth - hashWidth
 	if subjectWidth < 10 {
 		subjectWidth = 10
 	}
@@ -107,5 +157,10 @@ func (c *CommitList) formatCommit(commit git.Commit, width int) string {
 		subject = subject[:subjectWidth-3] + "..."
 	}
 
-	return fmt.Sprintf("%s %s", hash, subject)
+	// Style subject based on selection
+	if selected {
+		subject = c.styles.ListItemSelected.Render(subject)
+	}
+
+	return fmt.Sprintf("%s %s %s", cursor, hash, subject)
 }
