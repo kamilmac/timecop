@@ -13,6 +13,7 @@ import (
 const (
 	WindowFileList = "filelist"
 	WindowDiffView = "diffview"
+	WindowFileView = "fileview"
 	WindowHelp     = "help"
 )
 

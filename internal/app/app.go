@@ -31,6 +31,7 @@ type App struct {
 	// Windows
 	fileList *window.FileList
 	diffView *window.DiffView
+	fileView *window.FileView
 	help     *window.Help
 
 	// Window registry
@@ -57,6 +58,7 @@ func New(gitClient git.Client) *App {
 	// Create windows
 	fileList := window.NewFileList(styles)
 	diffView := window.NewDiffView(styles)
+	fileView := window.NewFileView(styles)
 	help := window.NewHelp(styles)
 
 	// Set initial focus
@@ -66,6 +68,7 @@ func New(gitClient git.Client) *App {
 	windows := map[string]window.Window{
 		config.WindowFileList: fileList,
 		config.WindowDiffView: diffView,
+		config.WindowFileView: fileView,
 		config.WindowHelp:     help,
 	}
 
@@ -80,13 +83,14 @@ func New(gitClient git.Client) *App {
 	}
 
 	app := &App{
-		state:          state,
-		git:            gitClient,
-		gh:             github.NewClient(),
+		state:       state,
+		git:         gitClient,
+		gh:          github.NewClient(),
 		layout:      layout.NewManager(layout.DefaultResponsive),
 		styles:      styles,
 		fileList:    fileList,
 		diffView:    diffView,
+		fileView:    fileView,
 		help:        help,
 		windows:     windows,
 		assignments: assignments,
@@ -189,16 +193,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, keys.DefaultKeyMap.ViewChanged):
 			a.state.SetFileViewMode(git.FileViewChanged)
 			a.fileList.SetViewMode(git.FileViewChanged)
+			a.setPreviewWindow(config.WindowDiffView)
 			return a, a.loadFiles()
 
 		case key.Matches(msg, keys.DefaultKeyMap.ViewAllFiles):
 			a.state.SetFileViewMode(git.FileViewAll)
 			a.fileList.SetViewMode(git.FileViewAll)
+			a.setPreviewWindow(config.WindowFileView)
 			return a, a.loadFiles()
 
 		case key.Matches(msg, keys.DefaultKeyMap.ViewDocs):
 			a.state.SetFileViewMode(git.FileViewDocs)
 			a.fileList.SetViewMode(git.FileViewDocs)
+			a.setPreviewWindow(config.WindowDiffView)
 			return a, a.loadFiles()
 
 		case key.Matches(msg, keys.DefaultKeyMap.ToggleDiffStyle):
@@ -223,6 +230,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				} else if filePath != "" {
 					toCopy = filePath
 				}
+			} else if a.state.FocusedWindow == config.WindowFileView {
+				filePath := a.fileView.GetFilePath()
+				lineNum := a.fileView.GetSelectedLine()
+				if filePath != "" && lineNum > 0 {
+					toCopy = fmt.Sprintf("%s:%d", filePath, lineNum)
+				} else if filePath != "" {
+					toCopy = filePath
+				}
 			} else if a.state.SelectedFile != "" {
 				toCopy = a.state.SelectedFile
 			}
@@ -234,9 +249,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case key.Matches(msg, keys.DefaultKeyMap.OpenEditor):
-			// Get file and line from diffview if focused there
+			// Get file and line from preview window if focused there
 			if a.state.FocusedWindow == config.WindowDiffView {
 				filePath, lineNum := a.diffView.GetSelectedLocation()
+				if filePath != "" {
+					return a, a.openInEditorAtLine(filePath, lineNum)
+				}
+			} else if a.state.FocusedWindow == config.WindowFileView {
+				filePath := a.fileView.GetFilePath()
+				lineNum := a.fileView.GetSelectedLine()
 				if filePath != "" {
 					return a, a.openInEditorAtLine(filePath, lineNum)
 				}
@@ -253,6 +274,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.state.SelectFile(msg.Index)
 		a.state.SelectedFolder = ""
 		a.state.IsRootSelected = false
+		// Use FileView in browse mode, DiffView otherwise
+		if a.state.FileViewMode == git.FileViewAll {
+			return a, a.loadFileContent()
+		}
 		return a, a.loadDiff()
 
 	case FolderSelectedMsg:
@@ -315,6 +340,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.diffView.SetFolderContent(msg.Content, msg.Path, a.state.IsRootSelected, a.state.PR)
 		return a, nil
 
+	case FileContentLoadedMsg:
+		a.fileView.SetContent(msg.Content, msg.Path)
+		return a, nil
+
 	case PRPollTickMsg:
 		// Refresh PR data and schedule next poll
 		return a, tea.Batch(a.loadPR(), a.schedulePRPoll())
@@ -347,13 +376,17 @@ func (a *App) delegateToFocused(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_, cmd = a.fileList.Update(msg)
 	case config.WindowDiffView:
 		_, cmd = a.diffView.Update(msg)
+	case config.WindowFileView:
+		_, cmd = a.fileView.Update(msg)
 	}
 
 	return a, cmd
 }
 
 func (a *App) cycleFocus(reverse bool) {
-	windowOrder := []string{config.WindowFileList, config.WindowDiffView}
+	// Use the current preview window in the cycle
+	previewWindow := a.getPreviewWindow()
+	windowOrder := []string{config.WindowFileList, previewWindow}
 	a.state.CycleWindow(windowOrder, reverse)
 	a.updateFocus()
 }
@@ -361,6 +394,24 @@ func (a *App) cycleFocus(reverse bool) {
 func (a *App) updateFocus() {
 	a.fileList.SetFocus(a.state.FocusedWindow == config.WindowFileList)
 	a.diffView.SetFocus(a.state.FocusedWindow == config.WindowDiffView)
+	a.fileView.SetFocus(a.state.FocusedWindow == config.WindowFileView)
+}
+
+// getPreviewWindow returns the current preview window name based on view mode
+func (a *App) getPreviewWindow() string {
+	if a.state.FileViewMode == git.FileViewAll {
+		return config.WindowFileView
+	}
+	return config.WindowDiffView
+}
+
+// setPreviewWindow updates layout assignments to use the specified preview window
+func (a *App) setPreviewWindow(windowName string) {
+	a.assignments["right"] = windowName
+	a.assignments["bottom"] = windowName
+	// Reset focus to file list when switching preview windows
+	a.state.FocusedWindow = config.WindowFileList
+	a.updateFocus()
 }
 
 // View renders the application
@@ -532,6 +583,19 @@ func (a *App) loadDiffStats() tea.Cmd {
 			return DiffStatsMsg{Added: 0, Removed: 0}
 		}
 		return DiffStatsMsg{Added: added, Removed: removed}
+	}
+}
+
+func (a *App) loadFileContent() tea.Cmd {
+	return func() tea.Msg {
+		if a.state.SelectedFile == "" {
+			return FileContentLoadedMsg{Content: "", Path: ""}
+		}
+		content, err := a.git.ReadFile(a.state.SelectedFile)
+		if err != nil {
+			return ErrorMsg{Err: err}
+		}
+		return FileContentLoadedMsg{Content: content, Path: a.state.SelectedFile}
 	}
 }
 

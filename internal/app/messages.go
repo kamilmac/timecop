@@ -89,3 +89,9 @@ type FolderDiffLoadedMsg struct {
 
 // PRPollTickMsg triggers a PR data refresh
 type PRPollTickMsg struct{}
+
+// FileContentLoadedMsg is sent when file content is loaded for FileView
+type FileContentLoadedMsg struct {
+	Content string
+	Path    string
+}
