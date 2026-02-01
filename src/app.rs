@@ -70,6 +70,7 @@ pub struct App {
     pub files: Vec<StatusEntry>,
     pub commits: Vec<Commit>,
     pub diff_stats: DiffStats,
+    stats_loaded: bool,
     pub pr: Option<PrInfo>,
     last_pr_poll: Instant,
 
@@ -101,6 +102,7 @@ impl App {
             files: vec![],
             commits: vec![],
             diff_stats: DiffStats::default(),
+            stats_loaded: false,
             pr: None,
             last_pr_poll: Instant::now(),
             file_list_state: FileListState::new(),
@@ -129,12 +131,9 @@ impl App {
         // Load commits
         self.commits = self.git.log(self.config.layout.max_commits)?;
 
-        // Load diff stats
-        if self.mode.is_changed_mode() {
-            self.diff_stats = self.git.diff_stats(self.mode.diff_mode())?;
-        } else {
-            self.diff_stats = DiffStats::default();
-        }
+        // Diff stats loaded lazily via handle_tick() for faster startup
+        self.diff_stats = DiffStats::default();
+        self.stats_loaded = false;
 
         // Update widget states
         self.file_list_state.set_files(self.files.clone());
@@ -182,6 +181,14 @@ impl App {
     /// Handle tick event - periodic updates
     pub fn handle_tick(&mut self) {
         const PR_POLL_INTERVAL: Duration = Duration::from_secs(60);
+
+        // Load diff stats lazily (deferred from refresh for faster startup)
+        if self.mode.is_changed_mode() && !self.stats_loaded {
+            if let Ok(stats) = self.git.diff_stats(self.mode.diff_mode()) {
+                self.diff_stats = stats;
+                self.stats_loaded = true;
+            }
+        }
 
         // Load PR on first tick (deferred from startup) or on interval
         let should_load = self.pr.is_none() || self.last_pr_poll.elapsed() >= PR_POLL_INTERVAL;
