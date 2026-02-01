@@ -25,9 +25,8 @@ impl Highlighter {
         let extension = path.rsplit('.').next().unwrap_or("");
 
         // Map extensions to syntax names for better coverage
-        // Note: TypeScript is NOT mapped to JS because JS syntax doesn't understand
-        // TS type annotations and can break highlighting (e.g., // comments)
         let mapped_ext = match extension {
+            "ts" | "tsx" | "mts" | "cts" => "typescript",
             "jsx" | "mjs" | "cjs" => "js",
             "yml" => "yaml",
             "md" => "markdown",
@@ -35,9 +34,20 @@ impl Highlighter {
             ext => ext,
         };
 
+        // Try mapped extension first, then original, then first line detection
+        // For TypeScript, fall back to JavaScript if no TS syntax available
+
         let syntax = self.syntax_set
             .find_syntax_by_extension(mapped_ext)
             .or_else(|| self.syntax_set.find_syntax_by_extension(extension))
+            // TypeScript fallback to JavaScript
+            .or_else(|| {
+                if matches!(extension, "ts" | "tsx" | "mts" | "cts") {
+                    self.syntax_set.find_syntax_by_extension("js")
+                } else {
+                    None
+                }
+            })
             .or_else(|| self.syntax_set.find_syntax_by_first_line(content.lines().next().unwrap_or("")))
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text());
 
