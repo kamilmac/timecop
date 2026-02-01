@@ -369,9 +369,9 @@ fn parse_file_content(content: &str) -> Vec<DiffLine> {
         .enumerate()
         .map(|(i, line)| DiffLine {
             left_text: Some(line.to_string()),
-            right_text: Some(line.to_string()),
+            right_text: None,  // Single column view
             left_num: Some(i + 1),
-            right_num: Some(i + 1),
+            right_num: None,
             line_type: LineType::Context,
             is_header: false,
         })
@@ -545,6 +545,31 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
 
     let num_width = 4;
 
+    // Single column mode (file content view, not diff)
+    let is_single_column = diff_line.right_text.is_none() && diff_line.right_num.is_none();
+
+    if is_single_column {
+        let left_num_str = diff_line.left_num
+            .map(|n| format!("{:>width$}", n, width = num_width))
+            .unwrap_or_else(|| " ".repeat(num_width));
+
+        let left_text = diff_line.left_text.as_deref().unwrap_or("");
+        let left_text = left_text.replace('\t', "    ");
+
+        let style = ratatui::style::Style::default().fg(colors.text);
+        let content_style = if cursor {
+            style.add_modifier(ratatui::style::Modifier::REVERSED)
+        } else {
+            style
+        };
+
+        spans.push(Span::styled(left_num_str, colors.style_muted()));
+        spans.push(Span::styled(" │ ", colors.style_muted()));
+        spans.push(Span::styled(left_text, content_style));
+        return Line::from(spans);
+    }
+
+    // Side-by-side diff mode
     // Left pane
     let left_num_str = diff_line.left_num
         .map(|n| format!("{:>width$}", n, width = num_width))

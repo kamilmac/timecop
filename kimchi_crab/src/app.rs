@@ -366,8 +366,11 @@ impl App {
                 } else {
                     PreviewContent::Empty
                 }
+            } else if entry.is_dir && (self.mode == AppMode::Browse || self.mode == AppMode::Docs) {
+                // Directory selected in browse/docs mode - show empty
+                PreviewContent::Empty
             } else if entry.is_dir {
-                // Directory selected - combined diff
+                // Directory selected in diff mode - combined diff
                 let diff = self
                     .git
                     .diff_files(&entry.children, self.mode.diff_mode())
