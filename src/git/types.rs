@@ -116,6 +116,10 @@ pub struct Commit {
     pub author: String,
     pub date: String,
     pub subject: String,
+    pub body: String,
+    pub files_changed: usize,
+    pub insertions: usize,
+    pub deletions: usize,
 }
 
 /// Diff statistics

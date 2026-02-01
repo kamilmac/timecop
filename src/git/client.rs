@@ -319,16 +319,54 @@ impl GitClient {
                 .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
                 .unwrap_or_default();
 
+            // Get commit body (message without subject line)
+            let body = commit.message()
+                .unwrap_or("")
+                .lines()
+                .skip(1)
+                .skip_while(|l| l.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // Get diff stats (compare with parent)
+            let (files_changed, insertions, deletions) = self.commit_stats(&commit)
+                .unwrap_or((0, 0, 0));
+
             commits.push(Commit {
                 hash: oid.to_string(),
                 short_hash: oid.to_string()[..7].to_string(),
                 author: author.name().unwrap_or("Unknown").to_string(),
                 date: datetime,
                 subject: commit.summary().unwrap_or("").to_string(),
+                body,
+                files_changed,
+                insertions,
+                deletions,
             });
         }
 
         Ok(commits)
+    }
+
+    /// Get diff stats for a commit (files changed, insertions, deletions)
+    fn commit_stats(&self, commit: &git2::Commit) -> Result<(usize, usize, usize)> {
+        let tree = commit.tree()?;
+        let parent_tree = commit.parent(0)
+            .ok()
+            .and_then(|p| p.tree().ok());
+
+        let diff = self.repo.diff_tree_to_tree(
+            parent_tree.as_ref(),
+            Some(&tree),
+            None,
+        )?;
+
+        let stats = diff.stats()?;
+        Ok((
+            stats.files_changed(),
+            stats.insertions(),
+            stats.deletions(),
+        ))
     }
 
     /// Get diff statistics

@@ -1,7 +1,7 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::Style,
+    style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
@@ -242,6 +242,7 @@ impl DiffViewState {
         }
 
         let mut result = Vec::with_capacity(lines.len() + comments.len() * 2);
+        let wrap_width = 120; // Wrap comments at this width
 
         for line in lines {
             let line_num = line.right_num.or(line.left_num);
@@ -260,16 +261,18 @@ impl DiffViewState {
                             line_type: LineType::Comment,
                             is_header: true,
                         });
-                        // Add comment body lines
+                        // Add comment body lines with wrapping
                         for body_line in comment.body.lines() {
-                            result.push(DiffLine {
-                                left_text: Some(format!("   {}", body_line)),
-                                right_text: None,
-                                left_num: None,
-                                right_num: None,
-                                line_type: LineType::Comment,
-                                is_header: true,
-                            });
+                            for wrapped in wrap_text(body_line, wrap_width) {
+                                result.push(DiffLine {
+                                    left_text: Some(format!("   {}", wrapped)),
+                                    right_text: None,
+                                    left_num: None,
+                                    right_num: None,
+                                    line_type: LineType::Comment,
+                                    is_header: true,
+                                });
+                            }
                         }
                     }
                 }
@@ -518,8 +521,28 @@ fn parse_commit_summary(commit: &Commit, pr: Option<&PrInfo>) -> Vec<DiffLine> {
     lines.push(make_header_line(format!("Hash:   {}", commit.hash), LineType::Context));
     lines.push(make_header_line(format!("Author: {}", commit.author), LineType::Context));
     lines.push(make_header_line(format!("Date:   {}", commit.date), LineType::Context));
+
+    // Stats
+    let stats_line = format!(
+        "Stats:  {} file{}, +{} -{}",
+        commit.files_changed,
+        if commit.files_changed == 1 { "" } else { "s" },
+        commit.insertions,
+        commit.deletions
+    );
+    lines.push(make_header_line(stats_line, LineType::Context));
+
     lines.push(make_header_line(String::new(), LineType::Context));
     lines.push(make_header_line(commit.subject.clone(), LineType::Info));
+
+    // Commit body if present
+    if !commit.body.is_empty() {
+        lines.push(make_header_line(String::new(), LineType::Context));
+        for line in commit.body.lines() {
+            lines.push(make_header_line(line.to_string(), LineType::Context));
+        }
+    }
+
     lines.push(make_header_line(String::new(), LineType::Context));
 
     // PR info
@@ -639,7 +662,10 @@ impl<'a> StatefulWidget for DiffView<'a> {
             let y = inner.y + i as u16;
             let is_cursor = self.focused && idx == state.cursor;
 
-            let line = if has_file_highlighting && diff_line.left_num.is_some() && diff_line.right_text.is_none() {
+            // Headers and comments always render full width first
+            let line = if diff_line.is_header {
+                render_header_line(diff_line, is_cursor, self.colors)
+            } else if has_file_highlighting && diff_line.left_num.is_some() && diff_line.right_text.is_none() {
                 // Use syntax highlighting for file content (single column)
                 let line_idx = diff_line.left_num.unwrap().saturating_sub(1);
                 render_highlighted_line(
@@ -648,7 +674,7 @@ impl<'a> StatefulWidget for DiffView<'a> {
                     is_cursor,
                     self.colors,
                 )
-            } else if has_diff_highlighting && !diff_line.is_header {
+            } else if has_diff_highlighting {
                 // Use syntax highlighting for diff (side-by-side)
                 let left_hl = diff_line.left_num.and_then(|n| state.highlighted_left.get(&n));
                 let right_hl = diff_line.right_num.and_then(|n| state.highlighted_right.get(&n));
@@ -667,6 +693,32 @@ impl<'a> StatefulWidget for DiffView<'a> {
             buf.set_line(inner.x, y, &line, inner.width);
         }
     }
+}
+
+fn render_header_line(diff_line: &DiffLine, cursor: bool, colors: &Colors) -> Line<'static> {
+    let text = diff_line.left_text.as_deref().unwrap_or("");
+
+    let (style, prefix) = match diff_line.line_type {
+        LineType::Header => (colors.style_header(), ""),
+        LineType::Info => (colors.style_muted(), ""),
+        LineType::Comment => {
+            // Comments get a distinctive style with background
+            let style = Style::default()
+                .fg(colors.comment)
+                .bg(Color::Rgb(45, 40, 30)); // Warm dark background
+            (style, "│ ")
+        }
+        _ => (Style::default().fg(colors.text), ""),
+    };
+
+    let content_style = if cursor {
+        style.add_modifier(ratatui::style::Modifier::REVERSED)
+    } else {
+        style
+    };
+
+    let display_text = format!("{}{}", prefix, text);
+    Line::from(Span::styled(display_text, content_style))
 }
 
 fn render_highlighted_line(
@@ -950,5 +1002,48 @@ fn truncate_or_pad(s: &str, width: usize) -> String {
         s.chars().take(width.saturating_sub(1)).collect::<String>() + "…"
     } else {
         format!("{:width$}", s, width = width)
+    }
+}
+
+/// Wrap text at word boundaries to fit within max_width
+fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    if text.is_empty() {
+        return vec![String::new()];
+    }
+
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+
+    for word in text.split_whitespace() {
+        if current_line.is_empty() {
+            if word.len() > max_width {
+                // Word is longer than max_width, split it
+                let mut remaining = word;
+                while remaining.len() > max_width {
+                    let (chunk, rest) = remaining.split_at(max_width);
+                    lines.push(chunk.to_string());
+                    remaining = rest;
+                }
+                current_line = remaining.to_string();
+            } else {
+                current_line = word.to_string();
+            }
+        } else if current_line.len() + 1 + word.len() <= max_width {
+            current_line.push(' ');
+            current_line.push_str(word);
+        } else {
+            lines.push(current_line);
+            current_line = word.to_string();
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines
     }
 }
