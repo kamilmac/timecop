@@ -96,20 +96,21 @@ func (f *FileList) SetViewMode(mode git.FileViewMode) {
 }
 
 // collapseLeafFolders collapses all folders that contain only files (no subdirectories)
+// Only collapses folders at or beyond TreeAutoCollapseDepth
 func (f *FileList) collapseLeafFolders() {
-	// Build a set of all directory paths
-	dirPaths := make(map[string]bool)
+	// Build a set of all directory paths with their depths
+	dirPaths := make(map[string]int) // path -> depth
 	for _, file := range f.files {
 		parts := strings.Split(file.Path, string(filepath.Separator))
 		for i := 1; i < len(parts); i++ {
 			dirPath := strings.Join(parts[:i], string(filepath.Separator))
-			dirPaths[dirPath] = true
+			dirPaths[dirPath] = i - 1 // depth is 0-indexed (0 = first level like "internal")
 		}
 	}
 
 	// Find leaf folders (folders that don't have any subdirectories)
-	leafFolders := make(map[string]bool)
-	for dir := range dirPaths {
+	leafFolders := make(map[string]int) // path -> depth
+	for dir, depth := range dirPaths {
 		isLeaf := true
 		for otherDir := range dirPaths {
 			if otherDir != dir && strings.HasPrefix(otherDir, dir+string(filepath.Separator)) {
@@ -118,13 +119,15 @@ func (f *FileList) collapseLeafFolders() {
 			}
 		}
 		if isLeaf {
-			leafFolders[dir] = true
+			leafFolders[dir] = depth
 		}
 	}
 
-	// Collapse all leaf folders
-	for dir := range leafFolders {
-		f.collapsed[dir] = true
+	// Collapse leaf folders at or beyond the configured depth
+	for dir, depth := range leafFolders {
+		if depth >= config.TreeAutoCollapseDepth {
+			f.collapsed[dir] = true
+		}
 	}
 }
 

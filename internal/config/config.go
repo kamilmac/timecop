@@ -77,7 +77,8 @@ const (
 // =============================================================================
 
 const (
-	TreeIndentSize = 2 // spaces per depth level
+	TreeIndentSize        = 2 // spaces per depth level
+	TreeAutoCollapseDepth = 2 // minimum depth for auto-collapse in browse mode (0 = root)
 )
 
 // Tree display characters
