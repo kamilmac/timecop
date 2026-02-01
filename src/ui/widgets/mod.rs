@@ -1,3 +1,4 @@
+mod diff_parser;
 mod diff_view;
 mod file_list;
 mod help;

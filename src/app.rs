@@ -6,14 +6,13 @@ use ratatui::{
     Frame,
 };
 use std::collections::HashMap;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
-use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::async_loader::AsyncLoader;
 use crate::config::Config;
 use crate::event::KeyInput;
-use crate::git::{AppMode, Commit, DiffStats, GitClient, StatusEntry};
-use crate::github::{GitHubClient, PrInfo, PrSummary};
+use crate::git::{AppMode, DiffStats, GitClient, StatusEntry};
+use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
     centered_rect, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
     Highlighter, InputModal, InputModalState, InputResult, PrListPanel, PrListPanelState,
@@ -45,10 +44,6 @@ impl FocusedWindow {
             Self::Preview => Self::PrList,
         }
     }
-
-    pub fn is_left_pane(self) -> bool {
-        matches!(self, Self::FileList | Self::PrList)
-    }
 }
 
 /// Command to execute after handling input
@@ -75,21 +70,13 @@ pub struct App {
 
     // Data
     pub branch: String,
-    pub base_branch: Option<String>,
     pub files: Vec<StatusEntry>,
-    pub commits: Vec<Commit>,
     pub diff_stats: DiffStats,
-    stats_loading: bool,
-    stats_rx: Option<Receiver<DiffStats>>,
-    // Full PR details for currently selected PR
     pub selected_pr: Option<PrInfo>,
-    selected_pr_number: Option<u64>,
-    pr_detail_loading: bool,
-    pr_detail_rx: Option<Receiver<Option<PrInfo>>>,
-    // PR list polling
+
+    // Async loading
+    async_loader: AsyncLoader,
     last_pr_list_poll: Instant,
-    pr_list_loading: bool,
-    pr_list_rx: Option<Receiver<Vec<PrSummary>>>,
 
     // Widget states
     pub file_list_state: FileListState,
@@ -107,8 +94,8 @@ impl App {
         let github = GitHubClient::new();
 
         let branch = git.current_branch().unwrap_or_else(|_| "HEAD".to_string());
-        let base_branch = git.base_branch().map(String::from);
 
+        let pr_poll_interval = Config::default().timing.pr_poll_interval;
         let mut app = Self {
             running: true,
             config: Config::default(),
@@ -120,19 +107,11 @@ impl App {
             show_help: false,
             pending_command: AppCommand::None,
             branch,
-            base_branch,
             files: vec![],
-            commits: vec![],
             diff_stats: DiffStats::default(),
-            stats_loading: false,
-            stats_rx: None,
             selected_pr: None,
-            selected_pr_number: None,
-            pr_detail_loading: false,
-            pr_detail_rx: None,
-            last_pr_list_poll: Instant::now() - Duration::from_secs(301), // Force immediate load
-            pr_list_loading: false,
-            pr_list_rx: None,
+            async_loader: AsyncLoader::new(),
+            last_pr_list_poll: Instant::now() - pr_poll_interval - Duration::from_secs(1), // Force immediate load
             file_list_state: FileListState::new(),
             pr_list_panel_state: PrListPanelState::new(),
             diff_view_state: DiffViewState::new(),
@@ -161,13 +140,11 @@ impl App {
             _ => self.git.status(self.mode.diff_mode())?,
         };
 
-        // Load commits
-        self.commits = self.git.log(self.config.layout.max_commits)?;
-
         // Trigger async stats loading
         self.diff_stats = DiffStats::default();
-        if self.mode.is_changed_mode() && !self.stats_loading {
-            self.spawn_stats_loader();
+        if self.mode.is_changed_mode() && !self.async_loader.is_stats_loading() {
+            self.async_loader
+                .load_stats(self.repo_path.clone(), self.mode.diff_mode());
         }
 
         // Update widget states
@@ -178,7 +155,6 @@ impl App {
             self.pr_list_panel_state.set_current_branch(self.branch.clone());
             // Clear selected PR details since branch changed
             self.selected_pr = None;
-            self.selected_pr_number = None;
         }
 
         // Update preview
@@ -187,62 +163,14 @@ impl App {
         Ok(())
     }
 
-    /// Spawn background thread to load diff stats
-    fn spawn_stats_loader(&mut self) {
-        let (tx, rx) = mpsc::channel();
-        self.stats_rx = Some(rx);
-        self.stats_loading = true;
+    /// Load PR details for a specific PR number
+    fn load_pr_details(&mut self, pr_number: u64) {
+        let already_loaded = self.selected_pr.as_ref().map(|p| p.number) == Some(pr_number);
+        let already_loading = self.async_loader.loading_pr_number() == Some(pr_number);
 
-        let path = self.repo_path.clone();
-        let mode = self.mode.diff_mode();
-        thread::spawn(move || {
-            if let Ok(git) = GitClient::open(&path) {
-                if let Ok(stats) = git.diff_stats(mode) {
-                    let _ = tx.send(stats);
-                }
-            }
-        });
-    }
-
-    /// Spawn background thread to load PR list
-    fn spawn_pr_list_loader(&mut self) {
-        let (tx, rx) = mpsc::channel();
-        self.pr_list_rx = Some(rx);
-        self.pr_list_loading = true;
-        self.pr_list_panel_state.loading = true;
-
-        thread::spawn(move || {
-            let mut github = GitHubClient::new();
-            let prs = if github.is_available() {
-                github.list_open_prs().unwrap_or_default()
-            } else {
-                vec![]
-            };
-            let _ = tx.send(prs);
-        });
-    }
-
-    /// Spawn background thread to load full PR details
-    fn spawn_pr_detail_loader(&mut self, pr_number: u64) {
-        let (tx, rx) = mpsc::channel();
-        self.pr_detail_rx = Some(rx);
-        self.pr_detail_loading = true;
-        self.selected_pr_number = Some(pr_number);
-
-        thread::spawn(move || {
-            let mut github = GitHubClient::new();
-            if github.is_available() {
-                // Use get_pr_for_branch but we need the PR number
-                // For now, we'll fetch by branch - but ideally we'd have a get_pr_by_number method
-                if let Ok(pr) = github.get_pr_by_number(pr_number) {
-                    let _ = tx.send(pr);
-                } else {
-                    let _ = tx.send(None);
-                }
-            } else {
-                let _ = tx.send(None);
-            }
-        });
+        if !already_loaded && !already_loading {
+            self.async_loader.load_pr_details(pr_number);
+        }
     }
 
     /// Apply full PR details to state
@@ -268,90 +196,46 @@ impl App {
 
     /// Handle tick event - periodic updates
     pub fn handle_tick(&mut self) {
-        const PR_LIST_POLL_INTERVAL: Duration = Duration::from_secs(300); // 5 minutes
+        let pr_poll_interval = self.config.timing.pr_poll_interval;
 
-        // Check for completed stats loading
-        if let Some(ref rx) = self.stats_rx {
-            match rx.try_recv() {
-                Ok(stats) => {
-                    self.diff_stats = stats;
-                    self.stats_loading = false;
-                    self.stats_rx = None;
-                }
-                Err(TryRecvError::Disconnected) => {
-                    self.stats_loading = false;
-                    self.stats_rx = None;
-                }
-                Err(TryRecvError::Empty) => {} // Still loading
+        // Poll for completed stats loading
+        if let Some(stats) = self.async_loader.poll_stats() {
+            self.diff_stats = stats;
+        }
+
+        // Poll for completed PR list loading
+        if let Some(prs) = self.async_loader.poll_pr_list() {
+            self.pr_list_panel_state.set_prs(prs);
+            self.last_pr_list_poll = Instant::now();
+
+            // Auto-load details for selected PR
+            if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
+                self.load_pr_details(pr_num);
             }
         }
 
-        // Check for completed PR list loading
-        if let Some(ref rx) = self.pr_list_rx {
-            match rx.try_recv() {
-                Ok(prs) => {
-                    self.pr_list_panel_state.set_prs(prs);
-                    self.pr_list_loading = false;
-                    self.pr_list_rx = None;
-                    self.last_pr_list_poll = Instant::now();
-
-                    // Auto-load details for selected PR
-                    if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
-                        let already_loaded = self.selected_pr.as_ref().map(|p| p.number) == Some(pr_num);
-                        if !already_loaded && !self.pr_detail_loading {
-                            self.spawn_pr_detail_loader(pr_num);
-                        }
-                    }
+        // Poll for completed PR detail loading
+        if let Some((pr_number, pr_opt)) = self.async_loader.poll_pr_details() {
+            if let Some(pr) = pr_opt {
+                // Only apply if this PR is still the one we want
+                let currently_selected = self.pr_list_panel_state.selected_number();
+                if currently_selected == Some(pr_number) {
+                    self.apply_pr_details(pr);
                 }
-                Err(TryRecvError::Disconnected) => {
-                    self.pr_list_loading = false;
-                    self.pr_list_rx = None;
-                    self.pr_list_panel_state.loading = false;
-                }
-                Err(TryRecvError::Empty) => {} // Still loading
+            }
+            // Update preview to show loaded content or clear loading state
+            if self.focused == FocusedWindow::PrList {
+                self.show_selected_pr_in_preview();
             }
         }
 
-        // Check for completed PR detail loading
-        if let Some(ref rx) = self.pr_detail_rx {
-            match rx.try_recv() {
-                Ok(Some(pr)) => {
-                    // Only apply if this PR is still the one we want
-                    let currently_selected = self.pr_list_panel_state.selected_number();
-                    if currently_selected == Some(pr.number) {
-                        self.apply_pr_details(pr);
-                    }
-                    self.pr_detail_loading = false;
-                    self.pr_detail_rx = None;
-                    // Update preview to show loaded content
-                    if self.focused == FocusedWindow::PrList {
-                        self.show_selected_pr_in_preview();
-                    }
-                }
-                Ok(None) => {
-                    self.pr_detail_loading = false;
-                    self.pr_detail_rx = None;
-                    // Update preview to clear loading state
-                    if self.focused == FocusedWindow::PrList {
-                        self.show_selected_pr_in_preview();
-                    }
-                }
-                Err(TryRecvError::Disconnected) => {
-                    self.pr_detail_loading = false;
-                    self.pr_detail_rx = None;
-                    // Update preview to clear loading state
-                    if self.focused == FocusedWindow::PrList {
-                        self.show_selected_pr_in_preview();
-                    }
-                }
-                Err(TryRecvError::Empty) => {} // Still loading
-            }
-        }
+        // Update loading state in PR panel
+        self.pr_list_panel_state.loading = self.async_loader.is_pr_list_loading();
 
-        // Trigger PR list loading if needed (on startup and every 5 minutes)
-        let should_load_pr_list = self.last_pr_list_poll.elapsed() >= PR_LIST_POLL_INTERVAL;
-        if should_load_pr_list && !self.pr_list_loading {
-            self.spawn_pr_list_loader();
+        // Trigger PR list loading if needed (on startup and periodically)
+        let should_load_pr_list = self.last_pr_list_poll.elapsed() >= pr_poll_interval;
+        if should_load_pr_list && !self.async_loader.is_pr_list_loading() {
+            self.async_loader.load_pr_list();
         }
     }
 
@@ -575,13 +459,7 @@ impl App {
         if selection_changed {
             // Load details for newly selected PR
             if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
-                // Check if we need to load this PR's details
-                let already_loaded = self.selected_pr.as_ref().map(|p| p.number) == Some(pr_num);
-                let already_loading = self.pr_detail_loading && self.selected_pr_number == Some(pr_num);
-
-                if !already_loaded && !already_loading {
-                    self.spawn_pr_detail_loader(pr_num);
-                }
+                self.load_pr_details(pr_num);
             }
             self.show_selected_pr_in_preview();
         }
@@ -591,7 +469,7 @@ impl App {
 
     fn show_selected_pr_in_preview(&mut self) {
         // Show loading indicator if fetching PR details
-        if self.pr_detail_loading {
+        if self.async_loader.is_pr_detail_loading() {
             if let Some(pr) = self.pr_list_panel_state.selected() {
                 self.diff_view_state.set_content(PreviewContent::Loading {
                     message: format!("Loading PR #{} details...", pr.number),
@@ -657,12 +535,7 @@ impl App {
             self.show_selected_pr_in_preview();
             // Load details if needed
             if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
-                let already_loaded = self.selected_pr.as_ref().map(|p| p.number) == Some(pr_num);
-                let already_loading = self.pr_detail_loading && self.selected_pr_number == Some(pr_num);
-
-                if !already_loaded && !already_loading {
-                    self.spawn_pr_detail_loader(pr_num);
-                }
+                self.load_pr_details(pr_num);
             }
         } else {
             self.update_preview();
@@ -811,7 +684,9 @@ impl App {
                 self.input_modal_state.hide();
                 // Refresh PR details to show the new comment/review
                 if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
-                    self.spawn_pr_detail_loader(pr_num);
+                    // Force reload by clearing the current PR
+                    self.selected_pr = None;
+                    self.async_loader.load_pr_details(pr_num);
                 }
             }
             Err(e) => {

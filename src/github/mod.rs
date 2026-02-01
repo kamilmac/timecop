@@ -57,64 +57,6 @@ impl GitHubClient {
         self.available.unwrap_or(false)
     }
 
-    /// Get PR info for the current branch
-    pub fn get_pr_for_branch(&mut self, _branch: &str) -> Result<Option<PrInfo>> {
-        if !self.is_available() {
-            return Ok(None);
-        }
-
-        // Get PR number
-        let output = Command::new("gh")
-            .args(["pr", "view", "--json", "number,title,body,author,state,url"])
-            .output()
-            .context("Failed to run gh pr view")?;
-
-        if !output.status.success() {
-            return Ok(None);
-        }
-
-        #[derive(Deserialize)]
-        struct PrBasic {
-            number: u64,
-            title: String,
-            body: String,
-            author: Author,
-            state: String,
-            url: String,
-        }
-
-        #[derive(Deserialize)]
-        struct Author {
-            login: String,
-        }
-
-        let basic: PrBasic = serde_json::from_slice(&output.stdout)
-            .context("Failed to parse PR JSON")?;
-
-        let mut pr_info = PrInfo {
-            number: basic.number,
-            title: basic.title,
-            body: basic.body,
-            author: basic.author.login,
-            state: basic.state,
-            url: basic.url,
-            ..Default::default()
-        };
-
-        // Get reviews
-        if let Ok(reviews) = self.get_reviews(basic.number) {
-            pr_info.reviews = reviews;
-        }
-
-        // Get comments
-        if let Ok((comments, file_comments)) = self.get_comments(basic.number) {
-            pr_info.comments = comments;
-            pr_info.file_comments = file_comments;
-        }
-
-        Ok(Some(pr_info))
-    }
-
     fn get_reviews(&self, pr_number: u64) -> Result<Vec<Review>> {
         let output = Command::new("gh")
             .args([
@@ -219,7 +161,6 @@ pub struct PrSummary {
     pub author: String,
     pub branch: String,
     pub updated_at: String,
-    pub url: String,
     pub review_requested: bool, // true if current user is requested reviewer
 }
 
@@ -314,7 +255,7 @@ impl GitHubClient {
             .args([
                 "pr", "list",
                 "--state", "open",
-                "--json", "number,title,author,headRefName,updatedAt,url,reviewRequests",
+                "--json", "number,title,author,headRefName,updatedAt,reviewRequests",
                 "--limit", "50",
             ])
             .output()
@@ -333,7 +274,6 @@ impl GitHubClient {
             head_ref_name: String,
             #[serde(rename = "updatedAt")]
             updated_at: String,
-            url: String,
             #[serde(rename = "reviewRequests", default)]
             review_requests: Vec<ReviewRequest>,
         }
@@ -346,7 +286,6 @@ impl GitHubClient {
         #[derive(Deserialize)]
         struct ReviewRequest {
             login: Option<String>,
-            name: Option<String>, // For team requests
         }
 
         let prs: Vec<PrData> = serde_json::from_slice(&output.stdout)
@@ -365,7 +304,6 @@ impl GitHubClient {
                 author: p.author.login,
                 branch: p.head_ref_name,
                 updated_at: p.updated_at.split('T').next().unwrap_or("").to_string(),
-                url: p.url,
                 review_requested,
             }
         }).collect())

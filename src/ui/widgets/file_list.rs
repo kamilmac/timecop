@@ -104,20 +104,6 @@ impl FileListState {
         self.cursor = self.entries.len().saturating_sub(1);
     }
 
-    pub fn toggle_collapse(&mut self) {
-        if let Some(entry) = self.entries.get(self.cursor) {
-            if entry.is_dir {
-                let path = entry.path.clone();
-                if self.collapsed.contains(&path) {
-                    self.collapsed.remove(&path);
-                } else {
-                    self.collapsed.insert(path);
-                }
-                self.rebuild_tree();
-            }
-        }
-    }
-
     pub fn collapse(&mut self) {
         if let Some(entry) = self.entries.get(self.cursor) {
             if entry.is_dir && !self.collapsed.contains(&entry.path) {
@@ -382,14 +368,14 @@ impl<'a> StatefulWidget for FileList<'a> {
             }
 
             let is_selected = idx == state.cursor;
-            let line = render_entry(entry, is_selected, self.colors, inner.width as usize);
+            let line = render_entry(entry, is_selected, self.colors);
 
             buf.set_line(inner.x, y, &line, inner.width);
         }
     }
 }
 
-fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors, width: usize) -> Line<'static> {
+fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'static> {
     let mut spans = vec![];
 
     // Cursor

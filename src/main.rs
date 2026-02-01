@@ -1,4 +1,5 @@
 mod app;
+mod async_loader;
 mod config;
 mod event;
 mod git;
@@ -32,6 +33,9 @@ struct Args {
 }
 
 fn main() -> Result<()> {
+    // Initialize logging (controlled by RUST_LOG env var)
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
     let args = Args::parse();
 
     // Resolve path
@@ -81,17 +85,11 @@ fn run_app<B: Backend + io::Write>(
             AppEvent::Key(key) => {
                 app.handle_key(key)?;
             }
-            AppEvent::Resize(_, _) => {
-                // Terminal will redraw automatically
-            }
             AppEvent::Tick => {
                 app.handle_tick();
             }
             AppEvent::FileChanged => {
                 app.refresh()?;
-            }
-            AppEvent::PrLoaded => {
-                // PR data updated
             }
         }
 
