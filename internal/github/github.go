@@ -12,6 +12,7 @@ import (
 type PRInfo struct {
 	Number         int                      `json:"number"`
 	Title          string                   `json:"title"`
+	Body           string                   `json:"body"`
 	State          string                   `json:"state"`
 	URL            string                   `json:"url"`
 	Author         string                   `json:"author"`
@@ -77,7 +78,7 @@ func (c *Client) HasRemote() bool {
 // GetPRForBranch gets PR info for the current branch
 func (c *Client) GetPRForBranch() (*PRInfo, error) {
 	cmd := exec.Command("gh", "pr", "view", "--json",
-		"number,title,state,url,author,createdAt,comments,reviews")
+		"number,title,body,state,url,author,createdAt,comments,reviews")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -86,6 +87,7 @@ func (c *Client) GetPRForBranch() (*PRInfo, error) {
 	var raw struct {
 		Number    int       `json:"number"`
 		Title     string    `json:"title"`
+		Body      string    `json:"body"`
 		State     string    `json:"state"`
 		URL       string    `json:"url"`
 		CreatedAt time.Time `json:"createdAt"`
@@ -116,6 +118,7 @@ func (c *Client) GetPRForBranch() (*PRInfo, error) {
 	pr := &PRInfo{
 		Number:    raw.Number,
 		Title:     raw.Title,
+		Body:      raw.Body,
 		State:     raw.State,
 		URL:       raw.URL,
 		Author:    raw.Author.Login,

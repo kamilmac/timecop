@@ -248,6 +248,16 @@ func (d *DiffView) renderPRSummary() string {
 	lines = append(lines, d.styles.Muted.Render(d.pr.URL))
 	lines = append(lines, "")
 
+	// PR Description
+	if d.pr.Body != "" {
+		lines = append(lines, d.styles.DiffHeader.Render("Description"))
+		lines = append(lines, d.styles.Muted.Render(strings.Repeat("─", 40)))
+		for _, line := range strings.Split(d.pr.Body, "\n") {
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
+	}
+
 	// Reviews
 	if len(d.pr.Reviews) > 0 {
 		lines = append(lines, d.styles.DiffHeader.Render("Reviews"))
