@@ -311,7 +311,20 @@ func (d *DiffView) renderFileContent(content string) string {
 		d.lineMap = nil
 		return d.styles.Muted.Render("Empty file")
 	}
+	if d.isBinary(content) {
+		d.lineMap = nil
+		return d.styles.Muted.Render("Binary file")
+	}
 	return d.renderFileWithLineNumbers(content)
+}
+
+func (d *DiffView) isBinary(content string) bool {
+	// Check first 8KB for null bytes (strong indicator of binary)
+	checkLen := len(content)
+	if checkLen > 8192 {
+		checkLen = 8192
+	}
+	return strings.Contains(content[:checkLen], "\x00")
 }
 
 func (d *DiffView) isDiffContent(content string) bool {
