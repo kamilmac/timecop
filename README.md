@@ -1,100 +1,65 @@
 # Kimchi
 
-**AI writes code. You review it.**
+Terminal UI for reviewing code changes. Built for the AI coding era.
+
+```
+┌─ Files (4) ────────┬─ src/app.rs ─────────────────────────────┐
+│ ▼ src/             │  12 │ fn main() {         fn main() {   │
+│   > app.rs      M  │  13 │-    old_call();                    │
+│     config.rs   M  │  14 │+                    new_call();    │
+├─ Commits (3) ──────┤  15 │ }                   }              │
+│ > abc123 Add feat  │                                          │
+├─ PRs (2) ──────────┤                                          │
+│ ● #42 @you         │                                          │
+└────────────────────┴──────────────────────────────────────────┘
+```
+
+## Install
 
 ```bash
-go install github.com/kmacinski/blocks@latest
-kimchi
+git clone https://github.com/kmacinski/kimchi
+cd kimchi
+cargo build --release
+cp target/release/kimchi ~/.local/bin/
 ```
-
----
-
-## The Problem
-
-You're using Claude, Cursor, Copilot, whatever. AI writes code. You run `git diff` a thousand times. You alt-tab between terminal and editor. You scroll through walls of green and red. You miss things. You approve anyway.
-
-## The Solution
-
-A terminal UI that shows you what changed. That's it.
-
-```
-┌─────────────────────┬──────────────────────────────────────┐
-│ Files (4)           │ src/main.go ────────────────── 42%   │
-│ ▼ src/              │  12 │ func main() {          │       │
-│   > main.go      M  │  13 │-    oldLine()          │       │
-│     app.go       M  │  14 │+    newLine()          │       │
-│ ▼ internal/         │  15 │ }                      │       │
-│       git.go     A  │                                      │
-├─────────────────────┤                                      │
-│ Commits (3)         │                                      │
-│ > abc123 Add feat   │                                      │
-├─────────────────────┴──────────────────────────────────────┤
-│ feature/thing  [branch]  4 files  +127 -43                 │
-└────────────────────────────────────────────────────────────┘
-```
-
----
-
-## What It Does
-
-- Shows changed files in a tree
-- Shows diffs side-by-side
-- Shows commits on your branch
-- Shows PR comments if you have `gh` installed
-- Refreshes automatically when files change
-- Vim keys because obviously
-
-## What It Doesn't Do
-
-- Edit files
-- Run commands
-- Integrate with your AI tool
-- Solve world hunger
-
-It's a viewer. Read-only. On purpose.
-
----
-
-## Keys
-
-| Key | What |
-|-----|------|
-| `j`/`k` | Up/down |
-| `Tab` | Next pane |
-| `m` | Cycle modes |
-| `1-4` | Jump to mode |
-| `y` | Copy path |
-| `o` | Open in $EDITOR |
-| `q` | Quit |
-| `?` | Help |
-
-## Modes
-
-| Key | Mode | Shows |
-|-----|------|-------|
-| `1` | working | Uncommitted changes |
-| `2` | branch | All changes vs base branch |
-| `3` | browse | All files |
-| `4` | docs | Markdown files |
-
----
 
 ## Requirements
 
-- Go 1.21+
-- Git
-- A terminal
-- Optional: `gh` CLI for PR stuff
+- **Git**
+- **gh CLI** (optional) — for PR list, reviews, and comments. [Install here](https://cli.github.com/). Without it, the app works fine for local git operations; PR features are simply disabled.
 
-## Build
+## Usage
 
 ```bash
-git clone https://github.com/kmacinski/blocks
-cd blocks
-go build -o kimchi .
-./kimchi
+kimchi              # current directory
+kimchi /path/to/repo
 ```
 
----
+## Keys
 
-MIT License. Do whatever.
+| Key | Action |
+|-----|--------|
+| `j/k` | Navigate |
+| `J/K` | Fast scroll |
+| `h/l` | Scroll diff horizontally |
+| `g/G` | Top/bottom |
+| `Tab` | Switch panes |
+| `1-4` | Switch mode |
+| `y` | Copy path |
+| `o` | Open in $EDITOR |
+| `?` | Help |
+| `q` | Quit |
+
+**PR actions** (requires `gh`): `a` approve, `x` request changes, `c` comment
+
+## Modes
+
+| `1` working | Uncommitted changes |
+|-------------|---------------------|
+| `2` branch | Changes vs base branch |
+| `3` browse | All tracked files |
+| `4` docs | Markdown files |
+
+## License
+
+MIT
