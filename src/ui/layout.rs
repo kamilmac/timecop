@@ -25,11 +25,10 @@ pub struct LayoutAreas {
 
 impl AppLayout {
     pub fn compute(&self, area: Rect, pr_count: usize) -> LayoutAreas {
-        // PR panel height based on count: 0→3, 1-4→count+2, 5+→8
+        // PR panel height: fits all PRs, max 16 visible
         let pr_height = match pr_count {
-            0 => 3,                          // border + "No open PRs"
-            1..=4 => (pr_count + 2) as u16,  // border + exact count
-            _ => 8,                          // border + 6 visible
+            0 => 3,                                        // border + "No open PRs"
+            _ => ((pr_count + 2) as u16).min(18),          // border + count, max 16 visible
         };
 
         // Split: main content | PR panel | status bar
