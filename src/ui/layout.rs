@@ -24,13 +24,20 @@ pub struct LayoutAreas {
 }
 
 impl AppLayout {
-    pub fn compute(&self, area: Rect) -> LayoutAreas {
+    pub fn compute(&self, area: Rect, pr_count: usize) -> LayoutAreas {
+        // PR panel height based on count: 0→3, 1-4→count+2, 5+→8
+        let pr_height = match pr_count {
+            0 => 3,                          // border + "No open PRs"
+            1..=4 => (pr_count + 2) as u16,  // border + exact count
+            _ => 8,                          // border + 6 visible
+        };
+
         // Split: main content | PR panel | status bar
         let v_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(10),
-                Constraint::Length(7), // PR panel height (1 line per PR, ~5 PRs visible + border)
+                Constraint::Length(pr_height),
                 Constraint::Length(1),
             ])
             .split(area);

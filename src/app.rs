@@ -702,7 +702,7 @@ impl App {
         let area = frame.area();
         let colors = &self.config.colors;
         let layout = AppLayout::default();
-        let areas = layout.compute(area);
+        let areas = layout.compute(area, self.pr_list_panel_state.prs.len());
 
         // Render file list
         let file_list = FileList::new(colors)
