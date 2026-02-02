@@ -13,14 +13,20 @@ cargo run -- /path       # Run in specific directory
 
 No tests currently exist.
 
+## Code Style Preferences
+
+- **Separation by feature, not type** - Group related functionality together rather than separating by file type (e.g., keep handlers with their views)
+- **Tight, focused code** - Remove dead code aggressively, avoid over-abstraction
+- **Inline with existing patterns** - Follow conventions already established in the codebase
+
 ## Architecture
 
-Kimchi is a TUI app built with Rust/Ratatui. It uses a centralized App struct that manages state and delegates to widget components.
+Kimchi is a TUI code review app built with Rust/Ratatui for reviewing GitHub PRs.
 
 ### Core Concepts
 
-- **App** (`src/app.rs`): Main application state and event handling. Manages focus, mode, and coordinates between widgets.
-- **Widgets** (`src/ui/widgets/`): Stateful UI components (FileList, CommitList, DiffView, HelpModal). Each implements Ratatui's `StatefulWidget`.
+- **App** (`src/app.rs`): Main application state and event handling. Manages focus, timeline position, and coordinates between widgets.
+- **Widgets** (`src/ui/widgets/`): Stateful UI components (FileList, DiffView, PrListPanel, HelpModal). Each implements Ratatui's `StatefulWidget`.
 - **Git Client** (`src/git/`): Native git operations via libgit2 (git2 crate). No shell commands.
 - **GitHub** (`src/github/`): PR info fetching via `gh` CLI.
 
@@ -36,18 +42,20 @@ Terminal Event → EventHandler thread → App.handle_key()
 - `src/main.rs` - Entry point, terminal setup, main loop
 - `src/app.rs` - App struct, event handling, state management
 - `src/event.rs` - Event handler thread, key input helpers
-- `src/config.rs` - Colors, layout config, timing
+- `src/config.rs` - Colors, timing config
 - `src/git/client.rs` - GitClient with libgit2
-- `src/git/types.rs` - FileStatus, AppMode enums, StatusEntry
+- `src/git/types.rs` - FileStatus, TimelinePosition, StatusEntry
 - `src/ui/widgets/file_list.rs` - Tree view with directory structure
 - `src/ui/widgets/diff_view.rs` - Side-by-side diff with inline comments
 
-### Modes
+### Timeline Navigation
 
-Press `m` to cycle through modes, or use number keys:
-- `1` - changes (all changes vs base branch, `●` marks uncommitted)
-- `2` - browse (all tracked files)
-- `3` - docs (markdown files only)
+Use `,` and `.` to navigate through PR history:
+- **wip** - Only uncommitted changes (HEAD → working tree)
+- **current** (◆) - Full diff against base branch
+- **-1 to -6** - Individual commit diffs
+
+The Files panel title shows commit context when viewing historical commits.
 
 ### Adding a Widget
 
