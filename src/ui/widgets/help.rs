@@ -46,21 +46,25 @@ impl<'a> Widget for HelpModal<'a> {
                 self.colors.style_muted(),
             )),
             Line::from(""),
-            Line::from(Span::styled("Timeline (◆─T─I─M─E─C─O─P─◆)", self.colors.style_header())),
+            Line::from(Span::styled("Timeline", self.colors.style_header())),
             Line::from(Span::styled(
-                "       ◆ (right)  all changes (base → head)",
+                "        ◆─T─I─M─E─C─O─P─◆",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "       P          uncommitted changes (wip)",
+                "        │ │ │ │ │ │ │ │ └─ all changes",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "       O C E M    commits -1 to -4",
+                "        │ │ │ │ │ │ │ └─── wip",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "       I T ◆      commits -5 to -7",
+                "        │ │ │ │ │ │ └───── -1",
+                self.colors.style_muted(),
+            )),
+            Line::from(Span::styled(
+                "        │ └─┴─┴─┴─┴─────── -2 to -7",
                 self.colors.style_muted(),
             )),
             Line::from(""),
