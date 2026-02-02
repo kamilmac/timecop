@@ -1,20 +1,12 @@
-//! Async loading utilities
-//!
-//! This module provides background loading capabilities for data that
-//! takes time to fetch (PR list, PR details, diff stats).
+//! Async loading utilities for PR data
 
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
-use crate::git::{DiffStats, GitClient};
 use crate::github::{GitHubClient, PrInfo, PrSummary};
 
-/// Manages async loading of PR and git data
+/// Manages async loading of PR data
 pub struct AsyncLoader {
-    // Stats loading
-    stats_rx: Option<Receiver<DiffStats>>,
-    stats_loading: bool,
-
     // PR list loading
     pr_list_rx: Option<Receiver<Vec<PrSummary>>>,
     pr_list_loading: bool,
@@ -34,19 +26,12 @@ impl Default for AsyncLoader {
 impl AsyncLoader {
     pub fn new() -> Self {
         Self {
-            stats_rx: None,
-            stats_loading: false,
             pr_list_rx: None,
             pr_list_loading: false,
             pr_detail_rx: None,
             pr_detail_loading: false,
             pr_detail_number: None,
         }
-    }
-
-    /// Check if stats are currently loading
-    pub fn is_stats_loading(&self) -> bool {
-        self.stats_loading
     }
 
     /// Check if PR list is currently loading
@@ -66,30 +51,6 @@ impl AsyncLoader {
         } else {
             None
         }
-    }
-
-    /// Spawn background thread to load diff stats
-    pub fn load_stats(&mut self, repo_path: String) {
-        if self.stats_loading {
-            return;
-        }
-
-        let (tx, rx) = mpsc::channel();
-        self.stats_rx = Some(rx);
-        self.stats_loading = true;
-
-        thread::spawn(move || {
-            if let Ok(git) = GitClient::open(&repo_path) {
-                match git.diff_stats() {
-                    Ok(stats) => {
-                        let _ = tx.send(stats);
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to load diff stats: {}", e);
-                    }
-                }
-            }
-        });
     }
 
     /// Spawn background thread to load PR list
@@ -148,25 +109,6 @@ impl AsyncLoader {
                 let _ = tx.send(None);
             }
         });
-    }
-
-    /// Poll for completed stats loading
-    pub fn poll_stats(&mut self) -> Option<DiffStats> {
-        let rx = self.stats_rx.as_ref()?;
-        match rx.try_recv() {
-            Ok(stats) => {
-                self.stats_loading = false;
-                self.stats_rx = None;
-                Some(stats)
-            }
-            Err(TryRecvError::Disconnected) => {
-                log::debug!("Stats loader disconnected");
-                self.stats_loading = false;
-                self.stats_rx = None;
-                None
-            }
-            Err(TryRecvError::Empty) => None,
-        }
     }
 
     /// Poll for completed PR list loading

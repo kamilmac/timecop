@@ -238,23 +238,6 @@ impl KeyInput {
         key.code == KeyCode::Char('?')
     }
 
-    pub fn is_mode_cycle(key: &KeyEvent) -> bool {
-        key.code == KeyCode::Char('m') && key.modifiers == KeyModifiers::NONE
-    }
-
-    pub fn get_mode_number(key: &KeyEvent) -> Option<u8> {
-        if key.modifiers != KeyModifiers::NONE {
-            return None;
-        }
-        match key.code {
-            KeyCode::Char('1') => Some(1),
-            KeyCode::Char('2') => Some(2),
-            KeyCode::Char('3') => Some(3),
-            KeyCode::Char('4') => Some(4),
-            _ => None,
-        }
-    }
-
     pub fn is_yank(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char('y') && key.modifiers == KeyModifiers::NONE
     }
@@ -279,11 +262,11 @@ impl KeyInput {
         key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::NONE
     }
 
-    pub fn is_timeline_back(key: &KeyEvent) -> bool {
+    pub fn is_timeline_next(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char(',') && key.modifiers == KeyModifiers::NONE
     }
 
-    pub fn is_timeline_forward(key: &KeyEvent) -> bool {
+    pub fn is_timeline_prev(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char('.') && key.modifiers == KeyModifiers::NONE
     }
 }

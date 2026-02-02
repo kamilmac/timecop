@@ -5,7 +5,6 @@ use std::time::Duration;
 pub struct Config {
     pub colors: Colors,
     pub timing: Timing,
-    pub layout: Layout,
 }
 
 impl Default for Config {
@@ -13,7 +12,6 @@ impl Default for Config {
         Self {
             colors: Colors::default(),
             timing: Timing::default(),
-            layout: Layout::default(),
         }
     }
 }
@@ -35,11 +33,6 @@ pub struct Colors {
     pub status_bar_text: Color,
     pub comment: Color,
     pub comment_bg: Color,
-    // Mode indicator colors (Vim-style)
-    pub mode_changes_bg: Color,
-    pub mode_browse_bg: Color,
-    pub mode_docs_bg: Color,
-    pub mode_text: Color,
 }
 
 impl Default for Colors {
@@ -60,11 +53,6 @@ impl Default for Colors {
             status_bar_text: Color::Rgb(205, 214, 244), // Text
             comment: Color::Rgb(249, 226, 175),   // Yellow for PR comments
             comment_bg: Color::Rgb(45, 40, 30),     // Warm dark background for comments
-            // Mode indicator colors (Vim-style, Catppuccin)
-            mode_changes_bg: Color::Rgb(137, 180, 250),  // Blue - changes mode
-            mode_browse_bg: Color::Rgb(166, 227, 161),   // Green - browsing files
-            mode_docs_bg: Color::Rgb(203, 166, 247),     // Mauve - documentation
-            mode_text: Color::Rgb(30, 30, 46),           // Base (dark) - text on colored bg
         }
     }
 }
@@ -107,18 +95,6 @@ impl Colors {
             .bg(self.status_bar)
             .fg(self.status_bar_text)
     }
-
-    pub fn style_mode_indicator(&self, mode: &crate::git::AppMode) -> Style {
-        let bg = match mode {
-            crate::git::AppMode::Changes => self.mode_changes_bg,
-            crate::git::AppMode::Browse => self.mode_browse_bg,
-            crate::git::AppMode::Docs => self.mode_docs_bg,
-        };
-        Style::default()
-            .bg(bg)
-            .fg(self.mode_text)
-            .add_modifier(Modifier::BOLD)
-    }
 }
 
 pub struct Timing {
@@ -129,19 +105,6 @@ impl Default for Timing {
     fn default() -> Self {
         Self {
             pr_poll_interval: Duration::from_secs(300), // 5 minutes
-        }
-    }
-}
-
-pub struct Layout {
-    /// In browse/docs mode, collapse folders at this depth and below (0 = root collapsed, 1 = first level collapsed)
-    pub browse_collapse_depth: usize,
-}
-
-impl Default for Layout {
-    fn default() -> Self {
-        Self {
-            browse_collapse_depth: 1, // Collapse folders at depth 1+
         }
     }
 }

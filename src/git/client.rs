@@ -194,40 +194,6 @@ impl GitClient {
         Ok(FileStatus::Modified)
     }
 
-    /// List all tracked files
-    pub fn list_all_files(&self) -> Result<Vec<StatusEntry>> {
-        let head = self.repo.head()?.peel_to_tree()?;
-        let mut entries = Vec::new();
-
-        head.walk(git2::TreeWalkMode::PreOrder, |dir, entry| {
-            if entry.kind() == Some(git2::ObjectType::Blob) {
-                let path = if dir.is_empty() {
-                    entry.name().unwrap_or("").to_string()
-                } else {
-                    format!("{}{}", dir, entry.name().unwrap_or(""))
-                };
-                entries.push(StatusEntry {
-                    path,
-                    status: FileStatus::Unchanged,
-                    uncommitted: false,
-                });
-            }
-            git2::TreeWalkResult::Ok
-        })?;
-
-        entries.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(entries)
-    }
-
-    /// List markdown files only
-    pub fn list_doc_files(&self) -> Result<Vec<StatusEntry>> {
-        let all = self.list_all_files()?;
-        Ok(all
-            .into_iter()
-            .filter(|e| e.path.ends_with(".md") || e.path.ends_with(".markdown"))
-            .collect())
-    }
-
     /// Get diff for a specific file (always against base branch)
     pub fn diff(&self, path: &str) -> Result<String> {
         let base = match &self.base_branch {
@@ -340,18 +306,34 @@ impl GitClient {
             .with_context(|| format!("Failed to read file: {}", path))
     }
 
-    /// Get diff statistics (committed changes vs base)
-    pub fn diff_stats(&self) -> Result<DiffStats> {
-        let base = match &self.base_branch {
-            Some(b) => b,
-            None => return Ok(DiffStats::default()),
-        };
+    /// Get diff statistics for a specific timeline position
+    pub fn diff_stats_at_position(&self, position: super::TimelinePosition) -> Result<DiffStats> {
+        use super::TimelinePosition;
 
-        let merge_base = self.merge_base_commit(base)?;
-        let head_commit = self.repo.head()?.peel_to_commit()?;
-        let base_tree = merge_base.tree()?;
-        let head_tree = head_commit.tree()?;
-        let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?;
+        let diff = match position {
+            TimelinePosition::FullDiff => {
+                let base = match &self.base_branch {
+                    Some(b) => b,
+                    None => return Ok(DiffStats::default()),
+                };
+                let merge_base = self.merge_base_commit(base)?;
+                let head_commit = self.repo.head()?.peel_to_commit()?;
+                let base_tree = merge_base.tree()?;
+                let head_tree = head_commit.tree()?;
+                self.repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), None)?
+            }
+            TimelinePosition::Wip => {
+                let head_tree = self.repo.head()?.peel_to_tree()?;
+                self.repo.diff_tree_to_workdir(Some(&head_tree), None)?
+            }
+            TimelinePosition::CommitDiff(n) => {
+                let old_commit = self.commit_at_offset(n)?;
+                let new_commit = self.commit_at_offset(n - 1)?;
+                let old_tree = old_commit.tree()?;
+                let new_tree = new_commit.tree()?;
+                self.repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?
+            }
+        };
 
         let stats = diff.stats()?;
         Ok(DiffStats {
@@ -416,6 +398,13 @@ impl GitClient {
         self.resolve_commit(&refspec)
     }
 
+    /// Get commit summary (first line of message) at HEAD~n
+    pub fn commit_summary_at_offset(&self, offset: usize) -> Result<String> {
+        let commit = self.commit_at_offset(offset)?;
+        let summary = commit.summary().unwrap_or("(no message)");
+        Ok(summary.to_string())
+    }
+
     /// Get diff for a file at a specific timeline position
     pub fn diff_at_position(&self, path: &str, position: super::TimelinePosition) -> Result<String> {
         use super::TimelinePosition;
@@ -432,7 +421,7 @@ impl GitClient {
         opts.pathspec(path);
 
         match position {
-            TimelinePosition::Current => {
+            TimelinePosition::FullDiff => {
                 // Base to HEAD (all committed changes)
                 let head_tree = self.repo.head()?.peel_to_tree()?;
                 let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
@@ -472,7 +461,7 @@ impl GitClient {
         log::debug!("status_at_position: {:?}", position);
 
         match position {
-            TimelinePosition::Current => {
+            TimelinePosition::FullDiff => {
                 // Show all committed changes: base → HEAD
                 self.status()
             }

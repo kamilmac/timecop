@@ -166,22 +166,6 @@ pub fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
     Some((left_start, right_start))
 }
 
-/// Parse file content into DiffLines (single column view)
-pub fn parse_file_content(content: &str) -> Vec<DiffLine> {
-    content
-        .lines()
-        .enumerate()
-        .map(|(i, line)| DiffLine {
-            left_text: Some(line.to_string()),
-            right_text: None, // Single column view
-            left_num: Some(i + 1),
-            right_num: None,
-            line_type: LineType::Context,
-            is_header: false,
-        })
-        .collect()
-}
-
 /// Create a header line for display
 fn make_header_line(text: String, line_type: LineType) -> DiffLine {
     DiffLine {
