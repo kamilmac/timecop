@@ -17,6 +17,7 @@ tokio = { version = "1", features = ["full"] }
 # File watching
 notify = "7"
 notify-debouncer-mini = "0.5"
+ignore = "0.4"
 
 # Git operations (native, no shell)
 git2 = "0.19"

@@ -1,5 +1,6 @@
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use ignore::gitignore::GitignoreBuilder;
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, DebouncedEventKind};
 use std::path::Path;
@@ -80,20 +81,34 @@ impl EventHandler {
     ) -> Option<notify_debouncer_mini::Debouncer<RecommendedWatcher>> {
         let repo_path = repo_dir.to_path_buf();
 
+        // Build gitignore matcher
+        let mut builder = GitignoreBuilder::new(&repo_path);
+        let gitignore_path = repo_path.join(".gitignore");
+        if gitignore_path.exists() {
+            let _ = builder.add(&gitignore_path);
+        }
+        let gitignore = builder.build().ok();
+
         let debouncer = new_debouncer(Duration::from_millis(300), move |res: DebounceEventResult| {
             if let Ok(events) = res {
                 for event in events {
                     if matches!(event.kind, DebouncedEventKind::Any) {
                         // Filter out .git internal changes (except index)
-                        let dominated_by_git = event.path
-                            .strip_prefix(&repo_path)
+                        let rel_path = event.path.strip_prefix(&repo_path).ok();
+
+                        let dominated_by_git = rel_path
                             .map(|p| {
                                 let p_str = p.to_string_lossy();
                                 p_str.starts_with(".git/") && !p_str.starts_with(".git/index")
                             })
                             .unwrap_or(false);
 
-                        if !dominated_by_git {
+                        // Check gitignore
+                        let is_ignored = gitignore.as_ref()
+                            .and_then(|gi| rel_path.map(|p| gi.matched(p, event.path.is_dir()).is_ignore()))
+                            .unwrap_or(false);
+
+                        if !dominated_by_git && !is_ignored {
                             let _ = tx.send(AppEvent::FileChanged);
                             break;
                         }
