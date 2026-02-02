@@ -767,6 +767,15 @@ impl App {
             ));
         }
 
+        // Uncommitted indicator
+        let uncommitted_count = self.files.iter().filter(|f| f.uncommitted).count();
+        if uncommitted_count > 0 {
+            left_spans.push(Span::styled(
+                format!(" ●{} ", uncommitted_count),
+                colors.style_modified(),
+            ));
+        }
+
         // Right side: mode indicator (Vim-style)
         let mode_text = format!(" {} ", self.mode.short_name().to_uppercase());
         let mode_width = mode_text.len();
