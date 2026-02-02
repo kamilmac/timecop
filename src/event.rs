@@ -75,20 +75,28 @@ impl EventHandler {
     }
 
     fn setup_watcher(
-        git_dir: &Path,
+        repo_dir: &Path,
         tx: mpsc::Sender<AppEvent>,
     ) -> Option<notify_debouncer_mini::Debouncer<RecommendedWatcher>> {
-        let git_index = git_dir.join(".git").join("index");
-        if !git_index.exists() {
-            return None;
-        }
+        let repo_path = repo_dir.to_path_buf();
 
-        let debouncer = new_debouncer(Duration::from_millis(500), move |res: DebounceEventResult| {
+        let debouncer = new_debouncer(Duration::from_millis(300), move |res: DebounceEventResult| {
             if let Ok(events) = res {
                 for event in events {
                     if matches!(event.kind, DebouncedEventKind::Any) {
-                        let _ = tx.send(AppEvent::FileChanged);
-                        break;
+                        // Filter out .git internal changes (except index)
+                        let dominated_by_git = event.path
+                            .strip_prefix(&repo_path)
+                            .map(|p| {
+                                let p_str = p.to_string_lossy();
+                                p_str.starts_with(".git/") && !p_str.starts_with(".git/index")
+                            })
+                            .unwrap_or(false);
+
+                        if !dominated_by_git {
+                            let _ = tx.send(AppEvent::FileChanged);
+                            break;
+                        }
                     }
                 }
             }
@@ -96,9 +104,10 @@ impl EventHandler {
 
         match debouncer {
             Ok(mut watcher) => {
+                // Watch the entire repo directory
                 if watcher
                     .watcher()
-                    .watch(&git_index, RecursiveMode::NonRecursive)
+                    .watch(repo_dir, RecursiveMode::Recursive)
                     .is_ok()
                 {
                     Some(watcher)
