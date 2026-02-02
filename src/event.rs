@@ -278,4 +278,12 @@ impl KeyInput {
     pub fn is_comment(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::NONE
     }
+
+    pub fn is_timeline_back(key: &KeyEvent) -> bool {
+        key.code == KeyCode::Char(',') && key.modifiers == KeyModifiers::NONE
+    }
+
+    pub fn is_timeline_forward(key: &KeyEvent) -> bool {
+        key.code == KeyCode::Char('.') && key.modifiers == KeyModifiers::NONE
+    }
 }

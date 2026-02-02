@@ -384,4 +384,121 @@ impl GitClient {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Count commits since base branch (for timeline)
+    pub fn commit_count_since_base(&self) -> Result<usize> {
+        let base = match &self.base_branch {
+            Some(b) => b,
+            None => return Ok(0),
+        };
+
+        let merge_base = self.merge_base_commit(base)?;
+        let head_commit = self.repo.head()?.peel_to_commit()?;
+
+        let mut count = 0;
+        let mut revwalk = self.repo.revwalk()?;
+        revwalk.push(head_commit.id())?;
+        revwalk.hide(merge_base.id())?;
+
+        for _ in revwalk {
+            count += 1;
+        }
+
+        Ok(count)
+    }
+
+    /// Get commit at HEAD~n
+    fn commit_at_offset(&self, offset: usize) -> Result<git2::Commit<'_>> {
+        if offset == 0 {
+            return self.repo.head()?.peel_to_commit().context("Failed to get HEAD");
+        }
+        let refspec = format!("HEAD~{}", offset);
+        self.resolve_commit(&refspec)
+    }
+
+    /// Get diff for a file at a specific timeline position
+    pub fn diff_at_position(&self, path: &str, position: super::TimelinePosition) -> Result<String> {
+        use super::TimelinePosition;
+
+        let base = match &self.base_branch {
+            Some(b) => b,
+            None => return self.working_diff(path),
+        };
+
+        let merge_base = self.merge_base_commit(base)?;
+        let base_tree = merge_base.tree()?;
+
+        let mut opts = DiffOptions::new();
+        opts.pathspec(path);
+
+        match position {
+            TimelinePosition::Uncommitted => {
+                // Base to working tree (includes all changes)
+                let diff = self.repo.diff_tree_to_workdir(Some(&base_tree), Some(&mut opts))?;
+                let result = self.diff_to_string(&diff)?;
+                if result.is_empty() {
+                    return self.format_new_file(path);
+                }
+                Ok(result)
+            }
+            TimelinePosition::Commit(offset) => {
+                // Base to HEAD~offset
+                let target_commit = self.commit_at_offset(offset)?;
+                let target_tree = target_commit.tree()?;
+                let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&target_tree), Some(&mut opts))?;
+                let result = self.diff_to_string(&diff)?;
+                Ok(result)
+            }
+        }
+    }
+
+    /// Get file status at a specific timeline position
+    pub fn status_at_position(&self, position: super::TimelinePosition) -> Result<Vec<StatusEntry>> {
+        use super::TimelinePosition;
+
+        match position {
+            TimelinePosition::Uncommitted => self.status(),
+            TimelinePosition::Commit(offset) => {
+                let base = match &self.base_branch {
+                    Some(b) => b,
+                    None => return Ok(vec![]),
+                };
+
+                let merge_base = self.merge_base_commit(base)?;
+                let target_commit = self.commit_at_offset(offset)?;
+
+                let base_tree = merge_base.tree()?;
+                let target_tree = target_commit.tree()?;
+
+                let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&target_tree), None)?;
+
+                let mut entries = Vec::new();
+                for delta in diff.deltas() {
+                    let path = delta
+                        .new_file()
+                        .path()
+                        .or_else(|| delta.old_file().path())
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    let status = match delta.status() {
+                        git2::Delta::Added => FileStatus::Added,
+                        git2::Delta::Deleted => FileStatus::Deleted,
+                        git2::Delta::Modified => FileStatus::Modified,
+                        git2::Delta::Renamed => FileStatus::Renamed,
+                        _ => continue,
+                    };
+
+                    entries.push(StatusEntry {
+                        path,
+                        status,
+                        uncommitted: false,
+                    });
+                }
+
+                entries.sort_by(|a, b| a.path.cmp(&b.path));
+                Ok(entries)
+            }
+        }
+    }
 }

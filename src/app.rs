@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use crate::async_loader::AsyncLoader;
 use crate::config::Config;
 use crate::event::KeyInput;
-use crate::git::{AppMode, DiffStats, GitClient, StatusEntry};
+use crate::git::{AppMode, DiffStats, GitClient, StatusEntry, TimelinePosition};
 use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
     centered_rect, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
@@ -67,6 +67,8 @@ pub struct App {
     pub focused: FocusedWindow,
     pub show_help: bool,
     pub pending_command: AppCommand,
+    pub timeline_position: TimelinePosition,
+    pub commit_count: usize,
 
     // Data
     pub branch: String,
@@ -106,6 +108,8 @@ impl App {
             focused: FocusedWindow::FileList,
             show_help: false,
             pending_command: AppCommand::None,
+            timeline_position: TimelinePosition::default(),
+            commit_count: 0,
             branch,
             files: vec![],
             diff_stats: DiffStats::default(),
@@ -133,11 +137,14 @@ impl App {
         let branch_changed = new_branch != self.branch;
         self.branch = new_branch;
 
-        // Load files based on mode
+        // Update commit count for timeline
+        self.commit_count = self.git.commit_count_since_base().unwrap_or(0);
+
+        // Load files based on mode and timeline position
         self.files = match self.mode {
             AppMode::Browse => self.git.list_all_files()?,
             AppMode::Docs => self.git.list_doc_files()?,
-            AppMode::Changes => self.git.status()?,
+            AppMode::Changes => self.git.status_at_position(self.timeline_position)?,
         };
 
         // Trigger async stats loading
@@ -154,6 +161,8 @@ impl App {
             self.pr_list_panel_state.set_current_branch(self.branch.clone());
             // Clear selected PR details since branch changed
             self.selected_pr = None;
+            // Reset timeline to default when branch changes
+            self.timeline_position = TimelinePosition::default();
         }
 
         // Update preview
@@ -359,6 +368,20 @@ impl App {
             return Ok(());
         }
 
+        // Timeline navigation (only in changes mode)
+        if self.mode.is_changed_mode() {
+            if KeyInput::is_timeline_back(&key) {
+                self.timeline_position = self.timeline_position.back(self.commit_count.saturating_sub(1));
+                self.refresh()?;
+                return Ok(());
+            }
+            if KeyInput::is_timeline_forward(&key) {
+                self.timeline_position = self.timeline_position.forward();
+                self.refresh()?;
+                return Ok(());
+            }
+        }
+
         // 'o' key is context-specific
         if KeyInput::is_open(&key) {
             match self.focused {
@@ -556,6 +579,7 @@ impl App {
                 PreviewContent::Empty
             } else if entry.is_dir {
                 // Directory selected in diff mode - combined diff
+                // TODO: diff_files doesn't support timeline yet
                 let diff = self
                     .git
                     .diff_files(&entry.children)
@@ -574,10 +598,10 @@ impl App {
                 self.diff_view_state.set_content_highlighted(content, &self.highlighter);
                 return;
             } else {
-                // Changed mode - diff with syntax highlighting
+                // Changed mode - diff with syntax highlighting at timeline position
                 let diff = self
                     .git
-                    .diff(&entry.path)
+                    .diff_at_position(&entry.path, self.timeline_position)
                     .unwrap_or_default();
                 let content = PreviewContent::FileDiff {
                     path: entry.path.clone(),
@@ -776,9 +800,18 @@ impl App {
             ));
         }
 
+        // Timeline indicator (only in changes mode with commits)
+        let timeline_text = if self.mode.is_changed_mode() && self.commit_count > 0 {
+            let timeline = self.render_timeline();
+            format!(" {} ", timeline)
+        } else {
+            String::new()
+        };
+        let timeline_width = timeline_text.len();
+
         // Right side: mode indicator (Vim-style)
         let mode_text = format!(" {} ", self.mode.short_name().to_uppercase());
-        let mode_width = mode_text.len();
+        let mode_width = mode_text.len() + timeline_width;
 
         // Calculate padding between left and right
         let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
@@ -791,6 +824,14 @@ impl App {
             colors.style_status_bar(),
         ));
 
+        // Timeline indicator
+        if !timeline_text.is_empty() {
+            left_spans.push(Span::styled(
+                timeline_text,
+                colors.style_status_bar(),
+            ));
+        }
+
         // Mode indicator with colored background
         left_spans.push(Span::styled(
             mode_text,
@@ -799,6 +840,36 @@ impl App {
 
         let line = Line::from(left_spans);
         frame.render_widget(line, area);
+    }
+
+    /// Render timeline indicator: ◀ ●─●─●─○─○ ▶
+    fn render_timeline(&self) -> String {
+        let max_dots = 5.min(self.commit_count + 1); // +1 for uncommitted
+        let mut result = String::from("◀ ");
+
+        for i in (0..max_dots).rev() {
+            let is_current = match self.timeline_position {
+                TimelinePosition::Uncommitted => i == 0,
+                TimelinePosition::Commit(n) => i == n + 1, // +1 because 0 is uncommitted
+            };
+
+            if is_current {
+                result.push('●');
+            } else {
+                result.push('○');
+            }
+
+            if i > 0 {
+                result.push('─');
+            }
+        }
+
+        result.push_str(" ▶");
+
+        // Add label
+        result.push_str(&format!(" {}", self.timeline_position.label()));
+
+        result
     }
 }
 
