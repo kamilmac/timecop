@@ -27,7 +27,7 @@ impl<'a> Widget for HelpModal<'a> {
             .borders(Borders::ALL)
             .border_style(self.colors.style_border_focused())
             .title(Span::styled(
-                "Kimchi - AI-Native Code Review",
+                "TIMECOP - Time-Travel Code Review",
                 self.colors.style_header(),
             ))
             .title_alignment(Alignment::Center);
@@ -38,25 +38,29 @@ impl<'a> Widget for HelpModal<'a> {
         let help_text = vec![
             Line::from(""),
             Line::from(Span::styled(
-                "  Review code changes against base branch. Navigate through",
+                "  Navigate through commit history. The TIMECOP title is your timeline.",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "  commit history with the timeline. Manage PRs without leaving terminal.",
+                "  Selected position glows red. Use , and . to time-travel.",
                 self.colors.style_muted(),
             )),
             Line::from(""),
-            Line::from(Span::styled("Timeline", self.colors.style_header())),
+            Line::from(Span::styled("Timeline (◆─T─I─M─E─C─O─P─◆)", self.colors.style_header())),
             Line::from(Span::styled(
-                "  ○─○─○─✱─◆  Use , and . to navigate",
+                "       ◆ (right)  all changes (base → head)",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "  commits ←─┘ │ └─ all changes (base → head)",
+                "       P          uncommitted changes (wip)",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "              └─── uncommitted (wip)",
+                "       O C E M    commits -1 to -4",
+                self.colors.style_muted(),
+            )),
+            Line::from(Span::styled(
+                "       I T ◆      commits -5 to -7",
                 self.colors.style_muted(),
             )),
             Line::from(""),

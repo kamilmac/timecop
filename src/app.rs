@@ -704,14 +704,11 @@ impl App {
 
         let total_width = area.width as usize;
         let timecop_green = Color::Rgb(150, 255, 170);
-        let timecop_dim = Color::Rgb(60, 90, 70);
         let timecop_red = Color::Rgb(255, 80, 80);
 
         let green_bold = ratatui::style::Style::default()
             .fg(timecop_green)
             .add_modifier(Modifier::BOLD);
-        let dim_style = ratatui::style::Style::default()
-            .fg(timecop_dim);
         let red_bold = ratatui::style::Style::default()
             .fg(timecop_red)
             .add_modifier(Modifier::BOLD);
@@ -722,30 +719,14 @@ impl App {
         let elements = ["◆", "─", "T", "─", "I", "─", "M", "─", "E", "─", "C", "─", "O", "─", "P", "─", "◆"];
         let position_to_index = [16, 14, 12, 10, 8, 6, 4, 2, 0]; // maps timeline position to element index
 
-        // Determine which positions are available
-        // Position 0 (FullDiff) and 1 (WIP) always available
-        // Position N >= 2 available if commit_count >= (N - 1)
-        let max_available_position = if self.commit_count == 0 { 1 } else { 1 + self.commit_count.min(7) };
-
         let selected_idx = self.timeline_position.display_index().min(8);
         let highlight_center = position_to_index[selected_idx];
 
         let mut spans = Vec::new();
         for (i, elem) in elements.iter().enumerate() {
-            // Find which position this element index corresponds to
-            let position_for_element = position_to_index.iter().position(|&idx| idx == i);
-            let is_available = position_for_element.map_or(true, |pos| pos <= max_available_position);
-
             // Highlight the selected element and adjacent dashes
             let is_highlighted = (i as isize - highlight_center as isize).abs() <= 1;
-
-            let style = if is_highlighted {
-                red_bold
-            } else if is_available {
-                green_bold
-            } else {
-                dim_style
-            };
+            let style = if is_highlighted { red_bold } else { green_bold };
             spans.push(Span::styled(*elem, style));
         }
 
