@@ -701,46 +701,62 @@ impl App {
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
         use ratatui::style::{Color, Modifier};
-        use ratatui::layout::Alignment;
-        use ratatui::widgets::Paragraph;
 
-        let logo = "◆─T─I─M─E─C─O─P─◆";
+        let total_width = area.width as usize;
         let timecop_green = Color::Rgb(150, 255, 170);
-        let style = ratatui::style::Style::default()
+        let green_bold = ratatui::style::Style::default()
             .fg(timecop_green)
             .add_modifier(Modifier::BOLD);
 
-        let paragraph = Paragraph::new(Span::styled(logo, style))
-            .alignment(Alignment::Center);
-        frame.render_widget(paragraph, area);
+        // Left: TIMECOP logo
+        let logo = " ◆─T─I─M─E─C─O─P─◆";
+
+        // Center: timeline indicator
+        let timeline = self.render_timeline();
+        let timeline_width = timeline.chars().count();
+        let logo_width = logo.chars().count();
+
+        // Calculate center position for timeline
+        let center_start = (total_width / 2).saturating_sub(timeline_width / 2);
+        let padding_after_logo = center_start.saturating_sub(logo_width);
+        let padding_after_timeline = total_width.saturating_sub(center_start + timeline_width);
+
+        let line = Line::from(vec![
+            Span::styled(logo, green_bold),
+            Span::raw(" ".repeat(padding_after_logo)),
+            Span::styled(timeline, green_bold),
+            Span::raw(" ".repeat(padding_after_timeline)),
+        ]);
+        frame.render_widget(line, area);
     }
 
     fn render_status_bar(&self, frame: &mut Frame, area: Rect) {
         let colors = &self.config.colors;
         let total_width = area.width as usize;
 
-        // Row 1: left=branch (+stats in full diff mode), right=position info
+        // Left: branch (+stats in full diff mode)
         let left_content = if matches!(self.timeline_position, TimelinePosition::FullDiff)
             && (self.diff_stats.added > 0 || self.diff_stats.removed > 0) {
-            format!(" {}  +{} -{} ", self.branch, format_count(self.diff_stats.added), format_count(self.diff_stats.removed))
+            format!(" {}  +{} -{}", self.branch, format_count(self.diff_stats.added), format_count(self.diff_stats.removed))
         } else {
-            format!(" {} ", self.branch)
+            format!(" {}", self.branch)
         };
 
+        // Right: position info
         let right_content = match self.timeline_position {
-            TimelinePosition::FullDiff => " all changes (base → head) ".to_string(),
-            TimelinePosition::Wip => " uncommitted changes ".to_string(),
+            TimelinePosition::FullDiff => "all changes (base → head) ".to_string(),
+            TimelinePosition::Wip => "uncommitted changes ".to_string(),
             TimelinePosition::CommitDiff(n) => {
                 if let Some(msg) = self.timeline_commit_message() {
-                    let max_len = 50;
+                    let max_len = 40;
                     let truncated = if msg.len() > max_len {
                         format!("{}...", &msg[..max_len])
                     } else {
                         msg
                     };
-                    format!(" commit -{}: {} ", n, truncated)
+                    format!("-{}: {} ", n, truncated)
                 } else {
-                    format!(" commit -{} ", n)
+                    format!("-{} ", n)
                 }
             }
         };
@@ -749,29 +765,12 @@ impl App {
         let right_width = right_content.chars().count();
         let padding = total_width.saturating_sub(left_width + right_width);
 
-        let row1 = Line::from(vec![
+        let line = Line::from(vec![
             Span::styled(left_content, colors.style_status_bar()),
             Span::styled(" ".repeat(padding), colors.style_status_bar()),
             Span::styled(right_content, colors.style_status_bar()),
         ]);
-
-        // Row 2: centered timeline indicator
-        let timeline = self.render_timeline();
-        let timeline_width = timeline.chars().count();
-        let left_pad = total_width.saturating_sub(timeline_width) / 2;
-        let right_pad = total_width.saturating_sub(timeline_width + left_pad);
-
-        let row2 = Line::from(vec![
-            Span::styled(" ".repeat(left_pad), colors.style_status_bar()),
-            Span::styled(timeline, colors.style_status_bar()),
-            Span::styled(" ".repeat(right_pad), colors.style_status_bar()),
-        ]);
-
-        // Render both rows
-        let row1_area = Rect { height: 1, ..area };
-        let row2_area = Rect { y: area.y + 1, height: 1, ..area };
-        frame.render_widget(row1, row1_area);
-        frame.render_widget(row2, row2_area);
+        frame.render_widget(line, area);
     }
 
     /// Render timeline indicator (right to left: oldest ← newest)

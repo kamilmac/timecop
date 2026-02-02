@@ -32,19 +32,21 @@ impl AppLayout {
             _ => ((pr_count + 2) as u16).min(18),          // border + count, max 16 visible
         };
 
-        // Split: main content | PR panel | status bar (2 rows)
+        // Split: header | main content | PR panel | status bar
         let v_chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
+                Constraint::Length(1),
                 Constraint::Min(10),
                 Constraint::Length(pr_height),
-                Constraint::Length(2),
+                Constraint::Length(1),
             ])
             .split(area);
 
-        let main_area = v_chunks[0];
-        let pr_info = v_chunks[1];
-        let status_bar = v_chunks[2];
+        let header = v_chunks[0];
+        let main_area = v_chunks[1];
+        let pr_info = v_chunks[2];
+        let status_bar = v_chunks[3];
 
         if area.width >= self.breakpoint {
             // Wide layout: file list | preview
@@ -58,18 +60,9 @@ impl AppLayout {
                 ])
                 .split(main_area);
 
-            // Split left column: header (1 row) | file list
-            let left_chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(1),
-                    Constraint::Min(0),
-                ])
-                .split(h_chunks[0]);
-
             LayoutAreas {
-                header: left_chunks[0],
-                file_list: left_chunks[1],
+                header,
+                file_list: h_chunks[0],
                 pr_info,
                 preview: h_chunks[1],
                 status_bar,
@@ -79,17 +72,16 @@ impl AppLayout {
             let v_main = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(1),
                     Constraint::Percentage(40),
                     Constraint::Percentage(60),
                 ])
                 .split(main_area);
 
             LayoutAreas {
-                header: v_main[0],
-                file_list: v_main[1],
+                header,
+                file_list: v_main[0],
                 pr_info,
-                preview: v_main[2],
+                preview: v_main[1],
                 status_bar,
             }
         }
