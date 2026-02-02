@@ -4,15 +4,13 @@ Terminal UI for reviewing code changes. Built for the AI coding era.
 
 ## Why
 
-AI agents write code now. Claude Code, Cursor, Copilot — they commit faster than you can review. This creates problems:
+AI agents commit faster than you can review. This creates problems:
 
-1. **You lose track of what's changing.** Agents commit frequently. `git diff` against your working tree shows nothing useful. What you need is diff against your base branch — the full picture of what's being built.
+1. **Working tree diff is useless.** Agents commit often. You need diff against base branch — the full picture.
+2. **PRs need faster access.** More code, more reviews. Browser switching kills flow.
+3. **Code is secondary.** When agents write, you review. The diff is the artifact, not the source file.
 
-2. **PRs need faster access.** More code means more PRs, more comments, more review cycles. Switching between terminal and browser kills flow. Review actions should be a keystroke away.
-
-3. **Code is secondary.** Controversial, but: when an agent writes the code, your job shifts from writing to reviewing. The diff becomes the primary artifact, not the source file. I want diffs side-by-side with my agent, not buried in a git command.
-
-Kimchi sits in a terminal pane next to your AI agent. It shows what changed, refreshes automatically, and lets you review PRs without leaving the terminal.
+Kimchi sits next to your AI agent. Shows changes, refreshes automatically, PRs are a keystroke away.
 
 ```
 ┌─ Files (4) ────────┬─ src/app.rs ─────────────────────────────┐
