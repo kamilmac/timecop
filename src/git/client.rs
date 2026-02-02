@@ -432,16 +432,17 @@ impl GitClient {
         opts.pathspec(path);
 
         match position {
-            TimelinePosition::All => {
-                // Base to working tree (all changes, original behavior)
-                let diff = self.repo.diff_tree_to_workdir(Some(&base_tree), Some(&mut opts))?;
+            TimelinePosition::Current => {
+                // Base to HEAD (all committed changes)
+                let head_tree = self.repo.head()?.peel_to_tree()?;
+                let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
                 let result = self.diff_to_string(&diff)?;
                 if result.is_empty() {
                     return self.format_new_file(path);
                 }
                 Ok(result)
             }
-            TimelinePosition::Uncommitted => {
+            TimelinePosition::Wip => {
                 // HEAD to working tree (uncommitted only)
                 let head_tree = self.repo.head()?.peel_to_tree()?;
                 let diff = self.repo.diff_tree_to_workdir(Some(&head_tree), Some(&mut opts))?;
@@ -451,11 +452,13 @@ impl GitClient {
                 }
                 Ok(result)
             }
-            TimelinePosition::Commit(offset) => {
-                // Base to HEAD~offset
-                let target_commit = self.commit_at_offset(offset)?;
-                let target_tree = target_commit.tree()?;
-                let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&target_tree), Some(&mut opts))?;
+            TimelinePosition::CommitDiff(n) => {
+                // Single commit: HEAD~n → HEAD~(n-1)
+                let old_commit = self.commit_at_offset(n)?;
+                let new_commit = self.commit_at_offset(n - 1)?;
+                let old_tree = old_commit.tree()?;
+                let new_tree = new_commit.tree()?;
+                let diff = self.repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), Some(&mut opts))?;
                 let result = self.diff_to_string(&diff)?;
                 Ok(result)
             }
@@ -469,28 +472,25 @@ impl GitClient {
         log::debug!("status_at_position: {:?}", position);
 
         match position {
-            TimelinePosition::All => {
-                // Show all changes: base → working tree (original behavior)
+            TimelinePosition::Current => {
+                // Show all committed changes: base → HEAD
                 self.status()
             }
-            TimelinePosition::Uncommitted => {
+            TimelinePosition::Wip => {
                 // Show ONLY uncommitted changes: HEAD → working tree
                 self.uncommitted_status()
             }
-            TimelinePosition::Commit(offset) => {
-                log::debug!("Getting status at HEAD~{}", offset);
-                let base = match &self.base_branch {
-                    Some(b) => b,
-                    None => return Ok(vec![]),
-                };
+            TimelinePosition::CommitDiff(n) => {
+                // Show changes from single commit: HEAD~n → HEAD~(n-1)
+                log::debug!("Getting single commit diff: HEAD~{} → HEAD~{}", n, n - 1);
 
-                let merge_base = self.merge_base_commit(base)?;
-                let target_commit = self.commit_at_offset(offset)?;
+                let old_commit = self.commit_at_offset(n)?;
+                let new_commit = self.commit_at_offset(n - 1)?;
 
-                let base_tree = merge_base.tree()?;
-                let target_tree = target_commit.tree()?;
+                let old_tree = old_commit.tree()?;
+                let new_tree = new_commit.tree()?;
 
-                let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&target_tree), None)?;
+                let diff = self.repo.diff_tree_to_tree(Some(&old_tree), Some(&new_tree), None)?;
 
                 let mut entries = Vec::new();
                 for delta in diff.deltas() {

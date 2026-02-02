@@ -805,24 +805,24 @@ impl App {
             ));
         }
 
-        // Timeline indicator (only in changes mode with commits)
-        let timeline_text = if self.mode.is_changed_mode() && self.commit_count > 0 {
+        // Timeline indicator (only in changes mode) - constant width
+        const TIMELINE_WIDTH: usize = 20; // "◀○○○○○○●○▶ current" = ~20 chars
+        let timeline_text = if self.mode.is_changed_mode() {
             let timeline = self.render_timeline();
             format!(" {} ", timeline)
         } else {
-            String::new()
+            " ".repeat(TIMELINE_WIDTH)
         };
-        let timeline_width = timeline_text.len();
 
         // Right side: mode indicator (Vim-style)
         let mode_text = format!(" {} ", self.mode.short_name().to_uppercase());
-        let mode_width = mode_text.len() + timeline_width;
 
         // Calculate padding between left and right
-        let left_width: usize = left_spans.iter().map(|s| s.content.len()).sum();
+        let right_width = timeline_text.chars().count() + mode_text.len();
+        let left_width: usize = left_spans.iter().map(|s| s.content.chars().count()).sum();
         let padding = (area.width as usize)
             .saturating_sub(left_width)
-            .saturating_sub(mode_width);
+            .saturating_sub(right_width);
 
         left_spans.push(Span::styled(
             " ".repeat(padding),
@@ -830,12 +830,10 @@ impl App {
         ));
 
         // Timeline indicator
-        if !timeline_text.is_empty() {
-            left_spans.push(Span::styled(
-                timeline_text,
-                colors.style_status_bar(),
-            ));
-        }
+        left_spans.push(Span::styled(
+            timeline_text,
+            colors.style_status_bar(),
+        ));
 
         // Mode indicator with colored background
         left_spans.push(Span::styled(
@@ -847,35 +845,38 @@ impl App {
         frame.render_widget(line, area);
     }
 
-    /// Render timeline indicator: ◀ ●─●─●─○─○ ▶
-    /// Order: oldest commits ... HEAD ... all ... wip
+    /// Render timeline indicator with constant width
+    /// Order (right to left): wip, current, -1, -2, -3, -4, -5, -6
     fn render_timeline(&self) -> String {
-        // Positions: wip(0), all(1), HEAD(2), -1(3), -2(4), etc.
-        let max_dots = 6.min(self.commit_count + 2); // commits + all + wip
-        let mut result = String::from("◀ ");
+        const NUM_POSITIONS: usize = 8; // wip + current + 6 commits
+        let mut result = String::from("◀");
 
-        for i in (0..max_dots).rev() {
-            let is_current = match self.timeline_position {
-                TimelinePosition::Uncommitted => i == 0,
-                TimelinePosition::All => i == 1,
-                TimelinePosition::Commit(n) => i == n + 2, // +2 because 0=wip, 1=all
+        // Draw dots from left (oldest) to right (newest)
+        for i in (0..NUM_POSITIONS).rev() {
+            let is_selected = self.timeline_position.display_index() == i;
+            let is_current_pos = i == 1; // "current" is at index 1
+            let is_available = match i {
+                0 => true, // wip always available
+                1 => true, // current always available
+                n => self.commit_count >= n - 1, // -1 needs 1 commit, -2 needs 2, etc.
             };
 
-            if is_current {
+            if is_selected {
                 result.push('●');
-            } else {
+            } else if is_current_pos {
+                result.push('◆'); // Diamond for current/base diff position
+            } else if is_available {
                 result.push('○');
-            }
-
-            if i > 0 {
-                result.push('─');
+            } else {
+                result.push('·');
             }
         }
 
-        result.push_str(" ▶");
+        result.push('▶');
 
-        // Add label
-        result.push_str(&format!(" {}", self.timeline_position.label()));
+        // Pad label to constant width
+        let label = self.timeline_position.label();
+        result.push_str(&format!(" {:>7}", label));
 
         result
     }

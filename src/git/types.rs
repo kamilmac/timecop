@@ -98,43 +98,53 @@ pub struct DiffStats {
 /// Timeline position for viewing PR history
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimelinePosition {
-    /// View all changes: base → working tree (default, original behavior)
-    #[default]
-    All,
-    /// View committed changes up to HEAD~N: base → HEAD~N
-    Commit(usize),
     /// View only uncommitted changes: HEAD → working tree
-    Uncommitted,
+    Wip,
+    /// View all committed changes: base → HEAD (default)
+    #[default]
+    Current,
+    /// View changes from a single commit: HEAD~N → HEAD~(N-1)
+    /// CommitDiff(1) = changes in the last commit (HEAD~1 → HEAD)
+    /// CommitDiff(2) = changes in commit before that (HEAD~2 → HEAD~1)
+    CommitDiff(usize),
 }
 
 impl TimelinePosition {
     /// Move back in time (towards older commits)
     pub fn back(self, max_commits: usize) -> Self {
         match self {
-            Self::All => Self::Commit(0),        // all → HEAD
-            Self::Uncommitted => Self::All,      // wip → all
-            Self::Commit(n) if n < max_commits => Self::Commit(n + 1),
+            Self::Wip => Self::Current,
+            Self::Current => Self::CommitDiff(1),
+            Self::CommitDiff(n) if n < max_commits && n < 6 => Self::CommitDiff(n + 1),
             other => other,
         }
     }
 
-    /// Move forward in time (towards uncommitted)
+    /// Move forward in time (towards wip)
     pub fn forward(self) -> Self {
         match self {
-            Self::Commit(0) => Self::All,        // HEAD → all
-            Self::Commit(n) => Self::Commit(n - 1),
-            Self::All => Self::Uncommitted,      // all → wip
-            Self::Uncommitted => Self::Uncommitted,
+            Self::CommitDiff(1) => Self::Current,
+            Self::CommitDiff(n) => Self::CommitDiff(n - 1),
+            Self::Current => Self::Wip,
+            Self::Wip => Self::Wip,
         }
     }
 
     /// Get display label
     pub fn label(&self) -> String {
         match self {
-            Self::All => "all".to_string(),
-            Self::Uncommitted => "wip".to_string(),
-            Self::Commit(0) => "HEAD".to_string(),
-            Self::Commit(n) => format!("-{}", n),
+            Self::Wip => "wip".to_string(),
+            Self::Current => "current".to_string(),
+            Self::CommitDiff(n) => format!("-{}", n),
+        }
+    }
+
+    /// Get index for timeline display (0 = rightmost = wip)
+    pub fn display_index(&self) -> usize {
+        match self {
+            Self::Wip => 0,
+            Self::Current => 1,
+            Self::CommitDiff(n) => n + 1,
         }
     }
 }
