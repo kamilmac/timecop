@@ -30,7 +30,7 @@ impl AppLayout {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(10),
-                Constraint::Length(12), // PR panel height (2 lines per PR, ~5 PRs visible)
+                Constraint::Length(7), // PR panel height (1 line per PR, ~5 PRs visible + border)
                 Constraint::Length(1),
             ])
             .split(area);

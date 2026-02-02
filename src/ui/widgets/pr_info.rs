@@ -66,13 +66,11 @@ impl PrListPanelState {
         self.selected().map(|pr| pr.number)
     }
 
-    fn ensure_visible(&mut self, height: usize) {
-        // 2 lines per PR
-        let visible_prs = height / 2;
+    fn ensure_visible(&mut self, visible_count: usize) {
         if self.cursor < self.offset {
             self.offset = self.cursor;
-        } else if self.cursor >= self.offset + visible_prs {
-            self.offset = self.cursor.saturating_sub(visible_prs) + 1;
+        } else if self.cursor >= self.offset + visible_count {
+            self.offset = self.cursor.saturating_sub(visible_count) + 1;
         }
     }
 }
@@ -136,41 +134,35 @@ impl<'a> StatefulWidget for PrListPanel<'a> {
             return;
         }
 
-        state.ensure_visible(inner.height as usize);
-
-        // 2 lines per PR
-        let visible_prs = (inner.height as usize) / 2;
+        let visible_count = inner.height as usize;
+        state.ensure_visible(visible_count);
 
         for (i, pr) in state
             .prs
             .iter()
             .skip(state.offset)
-            .take(visible_prs)
+            .take(visible_count)
             .enumerate()
         {
-            let y = inner.y + (i * 2) as u16;
+            let y = inner.y + i as u16;
             let idx = state.offset + i;
             let is_selected = self.focused && idx == state.cursor;
             let is_current_branch = pr.branch == state.current_branch;
 
-            let (line1, line2) = render_pr_lines(pr, is_selected, is_current_branch, self.colors, inner.width as usize);
-            buf.set_line(inner.x, y, &line1, inner.width);
-            if y + 1 < inner.y + inner.height {
-                buf.set_line(inner.x, y + 1, &line2, inner.width);
-            }
+            let line = render_pr_line(pr, is_selected, is_current_branch, self.colors, inner.width as usize);
+            buf.set_line(inner.x, y, &line, inner.width);
         }
     }
 }
 
-fn render_pr_lines(
+fn render_pr_line(
     pr: &PrSummary,
     selected: bool,
     is_current_branch: bool,
     colors: &Colors,
     width: usize,
-) -> (Line<'static>, Line<'static>) {
-    // Line 1: indicators #number @author days_ago
-    let mut spans1 = vec![];
+) -> Line<'static> {
+    let mut spans = vec![];
 
     // Current branch indicator
     let branch_indicator = if is_current_branch { "●" } else { " " };
@@ -179,7 +171,7 @@ fn render_pr_lines(
     } else {
         colors.style_muted()
     };
-    spans1.push(Span::styled(branch_indicator.to_string(), branch_style));
+    spans.push(Span::styled(branch_indicator.to_string(), branch_style));
 
     // Review requested indicator
     let review_indicator = if pr.review_requested { "◆" } else { " " };
@@ -188,7 +180,7 @@ fn render_pr_lines(
     } else {
         colors.style_muted()
     };
-    spans1.push(Span::styled(review_indicator.to_string(), review_style));
+    spans.push(Span::styled(format!("{} ", review_indicator), review_style));
 
     // PR number
     let pr_num = format!("#{:<5}", pr.number);
@@ -197,11 +189,18 @@ fn render_pr_lines(
     } else {
         colors.style_muted()
     };
-    spans1.push(Span::styled(pr_num, num_style));
+    spans.push(Span::styled(pr_num, num_style));
 
-    // Author
-    let author = format!("@{}", pr.author);
-    let author_len = author.len();
+    // Separator
+    let sep_style = if selected {
+        colors.style_selected().add_modifier(Modifier::REVERSED)
+    } else {
+        colors.style_muted()
+    };
+    spans.push(Span::styled("│ ", sep_style));
+
+    // Author (fixed width)
+    let author = format!("{:<12}", truncate(&pr.author, 12));
     let author_style = if selected {
         colors.style_selected().add_modifier(Modifier::REVERSED)
     } else if is_current_branch {
@@ -209,33 +208,20 @@ fn render_pr_lines(
     } else {
         ratatui::style::Style::default().fg(colors.text)
     };
-    spans1.push(Span::styled(author, author_style));
+    spans.push(Span::styled(author, author_style));
 
-    // Days ago (right-aligned)
-    let days_ago = days_ago_from_date(&pr.updated_at);
-    let days_str = format!(" {}", days_ago);
-    let used = 2 + 7 + author_len; // indicators (2) + #number + author
-    let padding = width.saturating_sub(used + days_str.len());
-    if padding > 0 {
-        let pad_style = if selected {
-            colors.style_selected().add_modifier(Modifier::REVERSED)
-        } else {
-            ratatui::style::Style::default()
-        };
-        spans1.push(Span::styled(" ".repeat(padding), pad_style));
-    }
-    let days_style = if selected {
-        colors.style_selected().add_modifier(Modifier::REVERSED)
-    } else {
-        colors.style_muted()
-    };
-    spans1.push(Span::styled(days_str, days_style));
+    // Separator
+    spans.push(Span::styled("│ ", sep_style));
 
-    // Line 2: indented title
-    let mut spans2 = vec![];
-    let indent = "   "; // 3 spaces
-    let title_width = width.saturating_sub(indent.len());
+    // Days ago (fixed width, right side)
+    let days_ago = format!("{:>7}", days_ago_from_date(&pr.updated_at));
+
+    // Title (fills remaining space)
+    // Calculate: indicators(4) + #number(7) + sep(2) + author(12) + sep(2) + days(7) + sep(2) = 36
+    let fixed_width = 4 + 7 + 2 + 12 + 2 + 7 + 2;
+    let title_width = width.saturating_sub(fixed_width);
     let title = truncate(&pr.title, title_width);
+    let title_padded = format!("{:<width$}", title, width = title_width);
 
     let title_style = if selected {
         colors.style_selected().add_modifier(Modifier::REVERSED)
@@ -244,11 +230,20 @@ fn render_pr_lines(
     } else {
         ratatui::style::Style::default().fg(colors.text)
     };
+    spans.push(Span::styled(title_padded, title_style));
 
-    spans2.push(Span::styled(indent.to_string(), title_style));
-    spans2.push(Span::styled(title, title_style));
+    // Separator before date
+    spans.push(Span::styled("│ ", sep_style));
 
-    (Line::from(spans1), Line::from(spans2))
+    // Days ago
+    let days_style = if selected {
+        colors.style_selected().add_modifier(Modifier::REVERSED)
+    } else {
+        colors.style_muted()
+    };
+    spans.push(Span::styled(days_ago, days_style));
+
+    Line::from(spans)
 }
 
 fn days_ago_from_date(date_str: &str) -> String {
@@ -288,13 +283,13 @@ fn days_ago_from_date(date_str: &str) -> String {
     if diff == 0 {
         "today".to_string()
     } else if diff == 1 {
-        "1d ago".to_string()
+        "1d".to_string()
     } else if diff < 7 {
-        format!("{}d ago", diff)
+        format!("{}d", diff)
     } else if diff < 30 {
-        format!("{}w ago", diff / 7)
+        format!("{}w", diff / 7)
     } else {
-        format!("{}mo ago", diff / 30)
+        format!("{}mo", diff / 30)
     }
 }
 
