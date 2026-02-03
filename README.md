@@ -1,5 +1,7 @@
 # TimeCop
 
+*Navigate commits like Van Damme navigates time. But sitting down.*
+
 TUI for code review. Built for AI coding workflow.
 
 <img src="screenshots/timecop.png" height="350" />
