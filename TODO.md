@@ -78,10 +78,11 @@ All state changes flow through events. No polling, no special cases. Timers and 
 - [ ] In single: map unified diff position to actual file line
 - [ ] "o" key opens editor at correct line regardless of mode
 
-**Cursor preservation when switching modes:**
+**Cursor preservation when switching modes:** (depends on focus behavior)
 - [ ] Track logical position (file line number) not display position
 - [ ] When toggling mode, stay on same file line
 - [ ] Handle edge cases: cursor on deleted line (no right-side equivalent)
+- Note: design this together with main window focus behavior
 
 ---
 
