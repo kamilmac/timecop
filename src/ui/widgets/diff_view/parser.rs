@@ -3,8 +3,6 @@
 //! This module contains functions for parsing various content types
 //! into displayable DiffLine structures.
 
-use crate::github::PrInfo;
-
 /// A parsed line ready for display in the diff view
 #[derive(Debug, Clone)]
 pub struct DiffLine {
@@ -164,121 +162,6 @@ pub fn parse_hunk_header(line: &str) -> Option<(usize, usize)> {
         .ok()?;
 
     Some((left_start, right_start))
-}
-
-/// Create a header line for display
-fn make_header_line(text: String, line_type: LineType) -> DiffLine {
-    DiffLine {
-        left_text: Some(text),
-        right_text: None,
-        left_num: None,
-        right_num: None,
-        line_type,
-        is_header: true,
-    }
-}
-
-/// Parse PR details into DiffLines
-pub fn parse_pr_details(pr: &PrInfo) -> Vec<DiffLine> {
-    let mut lines = vec![];
-
-    // PR header
-    lines.push(make_header_line(
-        format!("PR #{}", pr.number),
-        LineType::Header,
-    ));
-    lines.push(make_header_line("\u{2500}".repeat(40), LineType::Info));
-    lines.push(make_header_line(pr.title.clone(), LineType::Info));
-    lines.push(make_header_line(String::new(), LineType::Context));
-    lines.push(make_header_line(
-        format!("State:  {}", pr.state),
-        LineType::Context,
-    ));
-    lines.push(make_header_line(
-        format!("Author: @{}", pr.author),
-        LineType::Context,
-    ));
-    lines.push(make_header_line(
-        format!("URL:    {}", pr.url),
-        LineType::Context,
-    ));
-
-    // Description
-    if !pr.body.is_empty() {
-        lines.push(make_header_line(String::new(), LineType::Context));
-        lines.push(make_header_line("Description".to_string(), LineType::Header));
-        lines.push(make_header_line("\u{2500}".repeat(40), LineType::Info));
-        for line in pr.body.lines() {
-            lines.push(make_header_line(format!("  {}", line), LineType::Context));
-        }
-    }
-
-    // Reviews
-    if !pr.reviews.is_empty() {
-        lines.push(make_header_line(String::new(), LineType::Context));
-        lines.push(make_header_line("Reviews".to_string(), LineType::Header));
-        lines.push(make_header_line("\u{2500}".repeat(40), LineType::Info));
-        for review in &pr.reviews {
-            let (icon, line_type) = match review.state.as_str() {
-                "APPROVED" => ("\u{2713}", LineType::Added),
-                "CHANGES_REQUESTED" => ("\u{2717}", LineType::Removed),
-                _ => ("\u{25CB}", LineType::Context),
-            };
-            lines.push(make_header_line(
-                format!("  {} {} - {}", icon, review.author, review.state),
-                line_type,
-            ));
-            if !review.body.is_empty() {
-                for line in review.body.lines() {
-                    lines.push(make_header_line(format!("    {}", line), LineType::Context));
-                }
-            }
-        }
-    }
-
-    // General comments
-    if !pr.comments.is_empty() {
-        lines.push(make_header_line(String::new(), LineType::Context));
-        lines.push(make_header_line("Comments".to_string(), LineType::Header));
-        lines.push(make_header_line("\u{2500}".repeat(40), LineType::Info));
-        for comment in &pr.comments {
-            lines.push(make_header_line(
-                format!("  \u{1F4AC} {}", comment.author),
-                LineType::Comment,
-            ));
-            for line in comment.body.lines() {
-                lines.push(make_header_line(format!("    {}", line), LineType::Context));
-            }
-            lines.push(make_header_line(String::new(), LineType::Context));
-        }
-    }
-
-    // File comments (grouped by file)
-    if !pr.file_comments.is_empty() {
-        lines.push(make_header_line(String::new(), LineType::Context));
-        lines.push(make_header_line("File Comments".to_string(), LineType::Header));
-        lines.push(make_header_line("\u{2500}".repeat(40), LineType::Info));
-
-        for (path, comments) in &pr.file_comments {
-            lines.push(make_header_line(format!("  {}", path), LineType::Info));
-            for comment in comments {
-                let line_info = comment
-                    .line
-                    .map(|l| format!(":{}", l))
-                    .unwrap_or_default();
-                lines.push(make_header_line(
-                    format!("    \u{1F4AC} @{}{}", comment.author, line_info),
-                    LineType::Comment,
-                ));
-                for line in comment.body.lines() {
-                    lines.push(make_header_line(format!("      {}", line), LineType::Context));
-                }
-            }
-            lines.push(make_header_line(String::new(), LineType::Context));
-        }
-    }
-
-    lines
 }
 
 /// Wrap text at word boundaries to fit within max_width

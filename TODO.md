@@ -10,29 +10,23 @@ Remaining refactors and improvements.
 
 - [ ] Create `WidgetState` trait in `src/ui/widgets/mod.rs` for uniformity
 
-### Extract PrDetailsView from DiffView
+### Extract PrDetailsView from DiffView ✓
 
 Separating concerns makes DiffView more focused and scalable:
 
-- [ ] Create `pr_details/` widget for PR info, reviews, general comments
-- [ ] Remove `PreviewContent::PrDetails` variant from DiffView
-- [ ] Move `parse_pr_details()` to pr_details widget
-- [ ] Update App to render PrDetailsView when PR list is focused
-- [ ] DiffView becomes diff-only (FileDiff, FolderDiff, Loading, Empty)
+- [x] Create `pr_details/` widget for PR info, reviews, general comments
+- [x] Remove `PreviewContent::PrDetails` variant from DiffView
+- [x] Move `parse_pr_details()` to pr_details widget
+- [x] Update App to render PrDetailsView when PR list is focused
+- [x] DiffView becomes diff-only (FileDiff, FolderDiff, Empty)
 
 ---
 
 ## Focus & Navigation
 
-### Preview Pane Focus
+### Preview Pane Focus ✓
 
-Current behavior (unintuitive):
-- Tab cycles FileList ↔ PrList only
-- Enter on file → Preview
-- Escape → back to FileList
-
-Preferred:
-- [ ] Add Preview to tab cycle (Tab: FileList → PrList → Preview → ...)
+- [x] Add Preview to tab cycle (Tab: FileList → PrList → Preview → ...)
 
 ### Context-Dependent Preview Behavior
 
@@ -46,12 +40,12 @@ Preview shows different content based on left pane:
 
 ## Diff View Modes
 
-### Split/Single View Toggle
+### Split/Single View Toggle ✓
 
-- [ ] Add `DiffViewMode` enum (`Split`, `Single`) to DiffViewState
-- [ ] Add "s" key binding to toggle between modes
-- [ ] Implement single-pane unified diff rendering
-- [ ] Persist user preference (or just session state)
+- [x] Add `DiffViewMode` enum (`Split`, `Unified`) to DiffViewState
+- [x] Add "s" key binding to toggle between modes
+- [x] Implement single-pane unified diff rendering
+- [ ] Persist user preference (or just session state) - deferred
 
 ### Auto-Switch Based on Width
 

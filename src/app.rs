@@ -15,8 +15,8 @@ use crate::git::{DiffStats, GitClient, StatusEntry, TimelinePosition};
 use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
     centered_rect, Action, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
-    Highlighter, InputModal, InputModalState, InputResult, PrListPanel, PrListPanelState,
-    PreviewContent, ReviewAction, ReviewActionType,
+    Highlighter, InputModal, InputModalState, InputResult, PrDetailsView, PrDetailsViewState,
+    PrListPanel, PrListPanelState, PreviewContent, ReviewAction, ReviewActionType,
 };
 
 /// Which window is focused
@@ -82,6 +82,7 @@ pub struct App {
     pub file_list_state: FileListState,
     pub pr_list_panel_state: PrListPanelState,
     pub diff_view_state: DiffViewState,
+    pub pr_details_view_state: PrDetailsViewState,
     pub input_modal_state: InputModalState,
 
     // Syntax highlighting
@@ -115,6 +116,7 @@ impl App {
             file_list_state: FileListState::new(),
             pr_list_panel_state: PrListPanelState::new(),
             diff_view_state: DiffViewState::new(),
+            pr_details_view_state: PrDetailsViewState::new(),
             input_modal_state: InputModalState::new(),
             highlighter: Highlighter::new(),
         };
@@ -351,8 +353,13 @@ impl App {
             FocusedWindow::FileList => self.file_list_state.handle_key(&key),
             FocusedWindow::PrList => self.pr_list_panel_state.handle_key(&key),
             FocusedWindow::Preview => {
-                let pr_number = self.pr_list_panel_state.selected_number();
-                self.diff_view_state.handle_key(&key, pr_number)
+                // Check if we're in PR details context or file diff context
+                if self.pr_details_view_state.pr.is_some() || self.pr_details_view_state.loading_message.is_some() {
+                    self.pr_details_view_state.handle_key(&key)
+                } else {
+                    let pr_number = self.pr_list_panel_state.selected_number();
+                    self.diff_view_state.handle_key(&key, pr_number)
+                }
             }
         };
 
@@ -459,23 +466,23 @@ impl App {
         // Show loading indicator if fetching PR details
         if self.async_loader.is_pr_detail_loading() {
             if let Some(pr) = self.pr_list_panel_state.selected() {
-                self.diff_view_state.set_content(PreviewContent::Loading {
-                    message: format!("Loading PR #{} details...", pr.number),
-                });
+                self.pr_details_view_state.set_loading(
+                    format!("Loading PR #{} details...", pr.number),
+                );
             }
             return;
         }
 
         // Show selected PR details in preview
         if let Some(pr) = self.selected_pr.clone() {
-            self.diff_view_state.set_content(PreviewContent::PrDetails { pr });
+            self.pr_details_view_state.set_pr(Some(pr));
         } else if let Some(summary) = self.pr_list_panel_state.selected() {
             // Show basic info from summary if full details not loaded yet
-            self.diff_view_state.set_content(PreviewContent::Loading {
-                message: format!("PR #{}: {}", summary.number, summary.title),
-            });
+            self.pr_details_view_state.set_loading(
+                format!("PR #{}: {}", summary.number, summary.title),
+            );
         } else {
-            self.diff_view_state.set_content(PreviewContent::Empty);
+            self.pr_details_view_state.clear();
         }
     }
 
@@ -488,6 +495,8 @@ impl App {
                 self.load_pr_details(pr_num);
             }
         } else {
+            // Clear PR details view when leaving PR context
+            self.pr_details_view_state.clear();
             self.update_preview();
         }
     }
@@ -655,10 +664,15 @@ impl App {
             .focused(self.focused == FocusedWindow::PrList);
         frame.render_stateful_widget(pr_list_panel, areas.pr_info, &mut self.pr_list_panel_state);
 
-        // Render diff view
-        let diff_view = DiffView::new(colors)
-            .focused(self.focused == FocusedWindow::Preview);
-        frame.render_stateful_widget(diff_view, areas.preview, &mut self.diff_view_state);
+        // Render preview: PR details view or diff view depending on context
+        let preview_focused = self.focused == FocusedWindow::Preview;
+        if self.pr_details_view_state.pr.is_some() || self.pr_details_view_state.loading_message.is_some() {
+            let pr_details_view = PrDetailsView::new(colors).focused(preview_focused);
+            frame.render_stateful_widget(pr_details_view, areas.preview, &mut self.pr_details_view_state);
+        } else {
+            let diff_view = DiffView::new(colors).focused(preview_focused);
+            frame.render_stateful_widget(diff_view, areas.preview, &mut self.diff_view_state);
+        }
 
         // Render status bar
         self.render_status_bar(frame, areas.status_bar);
