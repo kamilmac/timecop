@@ -3,18 +3,18 @@
 Terminal UI for reviewing code changes. Built for the AI coding era.
 
 <p align="center">
-  <img src="screenshots/timecop.png" width="600" />
+  <img src="screenshots/timecop.png" height="250" />
 </p>
 
 ## Why
 
-Coding agents changed how we write code. They commit fast, iterate fast, produce more code than ever. **Reviews are the new bottleneck.**
+AI agents write code now. You review it. **Reviews are the new bottleneck.**
 
-Traditional tools don't fit this workflow:
+Traditional tools weren't built for this:
 
 1. **Working tree diff is useless.** Agents commit constantly. You need the full picture — diff against base branch.
 2. **Context switching kills flow.** Browser for PRs, terminal for code, editor for fixes. Too much friction.
-3. **Code review is the job now.** When agents write, you review. The diff is the artifact, not the source file.
+3. **The diff is the artifact.** When AI writes, you don't stare at source files — you review changes. The diff view is your primary workspace.
 
 TimeCop sits next to your coding agent. Watch changes happen in real-time, scroll through commit history, review PRs — all without leaving the terminal.
 
