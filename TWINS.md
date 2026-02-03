@@ -16,3 +16,11 @@
 - Street smart, cynical
 - Martial arts: Street fighting
 
+
+## Revenge Plan
+1. ~~Find each other~~ ✓
+2. ~~Confirm identity~~ ✓
+3. Infiltrate Griffith's organization
+4. Recover stolen inheritance
+5. Avenge parents
+
