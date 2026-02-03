@@ -159,6 +159,9 @@ impl App {
             self.timeline_position = TimelinePosition::default();
         }
 
+        // Force PR list reload on manual refresh
+        self.last_pr_list_poll = Instant::now() - self.config.timing.pr_poll_interval - Duration::from_secs(1);
+
         // Update preview
         self.update_preview();
 
