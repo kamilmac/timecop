@@ -41,15 +41,15 @@ fn main() -> Result<()> {
     // Resolve path
     let path = args.path.canonicalize().unwrap_or(args.path);
 
+    // Create app first (fails early if not a git repo)
+    let mut app = App::new(path.to_str().unwrap_or("."))?;
+
     // Initialize terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
-
-    // Create app
-    let mut app = App::new(path.to_str().unwrap_or("."))?;
 
     // Create event handler with git file watcher
     let events = EventHandler::with_git_watcher(Duration::from_millis(100), &path);
