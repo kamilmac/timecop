@@ -28,20 +28,20 @@ pub enum FocusedWindow {
 }
 
 impl FocusedWindow {
-    /// Tab cycles through all panes
+    /// Tab cycles through all panes (clockwise: Files → Preview → PRs)
     pub fn next(self) -> Self {
         match self {
-            Self::FileList => Self::PrList,
-            Self::PrList => Self::Preview,
-            Self::Preview => Self::FileList,
+            Self::FileList => Self::Preview,
+            Self::Preview => Self::PrList,
+            Self::PrList => Self::FileList,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::FileList => Self::Preview,
-            Self::PrList => Self::FileList,
-            Self::Preview => Self::PrList,
+            Self::FileList => Self::PrList,
+            Self::PrList => Self::Preview,
+            Self::Preview => Self::FileList,
         }
     }
 }

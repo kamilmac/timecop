@@ -77,7 +77,7 @@ impl<'a> Widget for HelpModal<'a> {
             format_binding("J/K", "Move fast (5 lines)", self.colors),
             format_binding("g/G", "Jump to top/bottom", self.colors),
             format_binding("h/l", "Collapse/expand folders", self.colors),
-            format_binding("Tab", "Cycle panes (Files → PRs → Preview)", self.colors),
+            format_binding("Tab", "Cycle panes (Files → Preview → PRs)", self.colors),
             format_binding("Enter", "Open diff / Checkout PR", self.colors),
             format_binding("Esc", "Back to file list", self.colors),
             format_binding(",", "Timeline: older commit", self.colors),
