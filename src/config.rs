@@ -88,8 +88,8 @@ impl Colors {
             header: Color::Rgb(0, 60, 180),
             muted: Color::Rgb(120, 120, 135),      // Lighter gray for dimmed text
             text: Color::Rgb(10, 10, 15),
-            border: Color::Rgb(180, 185, 195),     // Lighter border
-            border_focused: Color::Rgb(0, 60, 180),
+            border: Color::Rgb(190, 195, 205),     // Dim unfocused border
+            border_focused: Color::Rgb(0, 90, 220),// Bright blue focused border
             status_bar: Color::Rgb(235, 238, 245),
             status_bar_text: Color::Rgb(10, 10, 15),
             comment: Color::Rgb(160, 80, 0),

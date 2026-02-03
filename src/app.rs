@@ -28,20 +28,20 @@ pub enum FocusedWindow {
 }
 
 impl FocusedWindow {
-    /// Tab cycles through all panes (visual order: Files → PRs → Preview)
+    /// Tab cycles clockwise: Files → Preview → PRs
     pub fn next(self) -> Self {
         match self {
-            Self::FileList => Self::PrList,
-            Self::PrList => Self::Preview,
-            Self::Preview => Self::FileList,
+            Self::FileList => Self::Preview,
+            Self::Preview => Self::PrList,
+            Self::PrList => Self::FileList,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::FileList => Self::Preview,
-            Self::Preview => Self::PrList,
-            Self::PrList => Self::FileList,
+            Self::FileList => Self::PrList,
+            Self::PrList => Self::Preview,
+            Self::Preview => Self::FileList,
         }
     }
 }
@@ -395,7 +395,12 @@ impl App {
 
         // Escape goes back to left pane
         if KeyInput::is_escape(&key) && self.focused == FocusedWindow::Preview {
-            self.focused = FocusedWindow::FileList;
+            // Go back to PrList if viewing PR details, otherwise FileList
+            if self.pr_details_view_state.pr.is_some() || self.pr_details_view_state.loading_message.is_some() {
+                self.focused = FocusedWindow::PrList;
+            } else {
+                self.focused = FocusedWindow::FileList;
+            }
             self.on_focus_change();
             return Ok(());
         }
@@ -585,8 +590,14 @@ impl App {
             if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
                 self.load_pr_details(pr_num);
             }
+        } else if self.focused == FocusedWindow::Preview {
+            // Keep PR details when focusing preview (allows scrolling PR details)
+            // Only update diff preview if not viewing PR details
+            if self.pr_details_view_state.pr.is_none() && self.pr_details_view_state.loading_message.is_none() {
+                self.update_preview();
+            }
         } else {
-            // Clear PR details view when leaving PR context
+            // FileList focused - clear PR details and show file diff
             self.pr_details_view_state.clear();
             self.update_preview();
         }
