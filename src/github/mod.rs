@@ -66,6 +66,8 @@ impl GitHubClient {
             .output()?;
 
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!("Failed to fetch reviews for PR #{}: {}", pr_number, stderr);
             return Ok(Vec::new());
         }
 
@@ -107,6 +109,8 @@ impl GitHubClient {
             .output()?;
 
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!("Failed to fetch comments for PR #{}: {}", pr_number, stderr);
             return Ok((Vec::new(), HashMap::new()));
         }
 
@@ -260,6 +264,8 @@ impl GitHubClient {
             .context("Failed to run gh pr list")?;
 
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::warn!("Failed to list PRs: {}", stderr);
             return Ok(Vec::new());
         }
 

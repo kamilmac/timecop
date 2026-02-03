@@ -1,9 +1,6 @@
 //! Widget actions - what widgets report happened
 //!
 //! These actions define the interface between widgets and App.
-//! Some variants may not be used yet but are part of the planned API.
-
-#![allow(dead_code)]
 
 use std::path::PathBuf;
 
