@@ -4,6 +4,7 @@ mod config;
 mod event;
 mod git;
 mod github;
+mod theme;
 mod ui;
 
 use anyhow::Result;

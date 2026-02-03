@@ -3,7 +3,7 @@ use syntect::highlighting::{FontStyle, ThemeSet};
 use syntect::parsing::SyntaxSet;
 use syntect::easy::HighlightLines;
 
-use crate::config::ThemeMode;
+use crate::theme::ThemeMode;
 
 /// Syntax highlighter using syntect
 pub struct Highlighter {
