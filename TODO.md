@@ -39,4 +39,22 @@ All state changes flow through events. No polling, no special cases. Timers and 
 
 ---
 
+## Diff View Modes
+
+### Split/Single View Toggle
+
+- [ ] Add `DiffViewMode` enum (`Split`, `Single`) to DiffViewState
+- [ ] Add "s" key binding to toggle between modes
+- [ ] Implement single-pane unified diff rendering
+- [ ] Persist user preference (or just session state)
+
+### Auto-Switch Based on Width
+
+- [ ] Detect available width in diff preview area
+- [ ] Auto-switch to single view when width < threshold (e.g., 120 chars)
+- [ ] Auto-switch to split view when width >= threshold
+- [ ] Manual toggle should override auto behavior until resize
+
+---
+
 ## Minor Fixes
