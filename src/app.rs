@@ -14,9 +14,9 @@ use crate::event::KeyInput;
 use crate::git::{DiffStats, GitClient, StatusEntry, TimelinePosition};
 use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
-    centered_rect, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
+    centered_rect, Action, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
     Highlighter, InputModal, InputModalState, InputResult, PrListPanel, PrListPanelState,
-    PreviewContent, ReviewAction,
+    PreviewContent, ReviewAction, ReviewActionType,
 };
 
 /// Which window is focused
@@ -348,91 +348,110 @@ impl App {
             return Ok(());
         }
 
-        // Window-specific keys
-        match self.focused {
-            FocusedWindow::FileList => self.handle_file_list_key(&key)?,
-            FocusedWindow::PrList => self.handle_pr_list_panel_key(&key)?,
-            FocusedWindow::Preview => self.handle_preview_key(&key)?,
-        }
+        // Window-specific keys - delegate to widget, dispatch action
+        let action = match self.focused {
+            FocusedWindow::FileList => self.file_list_state.handle_key(&key),
+            FocusedWindow::PrList => self.pr_list_panel_state.handle_key(&key),
+            FocusedWindow::Preview => {
+                let pr_number = self.pr_list_panel_state.selected_number();
+                self.diff_view_state.handle_key(&key, pr_number)
+            }
+        };
+
+        self.dispatch(action)?;
 
         Ok(())
     }
 
-    fn handle_file_list_key(&mut self, key: &KeyEvent) -> Result<()> {
-        let changed = if KeyInput::is_down(key) {
-            self.file_list_state.move_down();
-            true
-        } else if KeyInput::is_up(key) {
-            self.file_list_state.move_up();
-            true
-        } else if KeyInput::is_fast_down(key) {
-            self.file_list_state.move_down_n(5);
-            true
-        } else if KeyInput::is_fast_up(key) {
-            self.file_list_state.move_up_n(5);
-            true
-        } else if KeyInput::is_top(key) {
-            self.file_list_state.go_top();
-            true
-        } else if KeyInput::is_bottom(key) {
-            self.file_list_state.go_bottom();
-            true
-        } else if KeyInput::is_left(key) {
-            self.file_list_state.collapse();
-            true
-        } else if KeyInput::is_right(key) {
-            self.file_list_state.expand();
-            true
-        } else {
-            false
-        };
+    /// Dispatch an action from a widget
+    fn dispatch(&mut self, action: Action) -> Result<()> {
+        match action {
+            Action::None | Action::Ignored => {}
 
-        if changed {
+            Action::Quit => {
+                self.running = false;
+            }
+
+            Action::Refresh => {
+                self.refresh()?;
+            }
+
+            Action::ToggleHelp => {
+                self.show_help = !self.show_help;
+            }
+
+            Action::ChangeFocus(target) => {
+                use crate::ui::FocusTarget;
+                self.focused = match target {
+                    FocusTarget::FileList => FocusedWindow::FileList,
+                    FocusTarget::PrList => FocusedWindow::PrList,
+                    FocusTarget::Preview => FocusedWindow::Preview,
+                    FocusTarget::Next => self.focused.next_left(),
+                    FocusTarget::Prev => self.focused.prev_left(),
+                };
+                self.on_focus_change();
+            }
+
+            Action::FileSelected(_path) => {
+                // Go to preview when file is selected
+                self.focused = FocusedWindow::Preview;
+                self.on_focus_change();
+            }
+
+            Action::PrSelected(pr_number) => {
+                self.load_pr_details(pr_number);
+                self.show_selected_pr_in_preview();
+            }
+
+            Action::CheckoutPr(pr_number) => {
+                let _ = self.github.checkout_pr(pr_number);
+                self.refresh()?;
+            }
+
+            Action::OpenPrInBrowser(pr_number) => {
+                let _ = self.github.open_pr_in_browser(pr_number);
+            }
+
+            Action::OpenReviewModal(review_type) => {
+                let review_action = match review_type {
+                    ReviewActionType::Approve { pr_number } => {
+                        ReviewAction::Approve { pr_number }
+                    }
+                    ReviewActionType::RequestChanges { pr_number } => {
+                        ReviewAction::RequestChanges { pr_number }
+                    }
+                    ReviewActionType::Comment { pr_number } => {
+                        ReviewAction::Comment { pr_number }
+                    }
+                    ReviewActionType::LineComment { pr_number, path, line } => {
+                        ReviewAction::LineComment { pr_number, path, line }
+                    }
+                };
+                self.input_modal_state.show(review_action);
+            }
+
+            Action::YankPath => {
+                self.yank_path();
+            }
+
+            Action::OpenInEditor => {
+                self.open_in_editor();
+            }
+
+            Action::TimelineNext => {
+                self.timeline_position = self.timeline_position.next(self.commit_count);
+                self.refresh()?;
+            }
+
+            Action::TimelinePrev => {
+                self.timeline_position = self.timeline_position.prev();
+                self.refresh()?;
+            }
+        }
+
+        // Update preview after actions that change file list state
+        if matches!(self.focused, FocusedWindow::FileList) {
             self.update_preview();
-        }
-
-        Ok(())
-    }
-
-    fn handle_pr_list_panel_key(&mut self, key: &KeyEvent) -> Result<()> {
-        // Review actions
-        if KeyInput::is_approve(key) {
-            if let Some(pr) = self.pr_list_panel_state.selected() {
-                self.input_modal_state.show(ReviewAction::Approve { pr_number: pr.number });
-            }
-            return Ok(());
-        }
-
-        if KeyInput::is_request_changes(key) {
-            if let Some(pr) = self.pr_list_panel_state.selected() {
-                self.input_modal_state.show(ReviewAction::RequestChanges { pr_number: pr.number });
-            }
-            return Ok(());
-        }
-
-        if KeyInput::is_comment(key) {
-            if let Some(pr) = self.pr_list_panel_state.selected() {
-                self.input_modal_state.show(ReviewAction::Comment { pr_number: pr.number });
-            }
-            return Ok(());
-        }
-
-        let selection_changed = if KeyInput::is_down(key) {
-            self.pr_list_panel_state.move_down();
-            true
-        } else if KeyInput::is_up(key) {
-            self.pr_list_panel_state.move_up();
-            true
-        } else {
-            false
-        };
-
-        if selection_changed {
-            // Load details for newly selected PR
-            if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
-                self.load_pr_details(pr_num);
-            }
-            self.show_selected_pr_in_preview();
         }
 
         Ok(())
@@ -460,44 +479,6 @@ impl App {
         } else {
             self.diff_view_state.set_content(PreviewContent::Empty);
         }
-    }
-
-    fn handle_preview_key(&mut self, key: &KeyEvent) -> Result<()> {
-        // Line comment on current line (only if we have a selected PR and are viewing a file diff)
-        if KeyInput::is_comment(key) {
-            if let (Some(pr_num), Some(path), Some(line)) = (
-                self.pr_list_panel_state.selected_number(),
-                self.diff_view_state.get_current_file().map(|s| s.to_string()),
-                self.diff_view_state.get_current_line_number(),
-            ) {
-                self.input_modal_state.show(ReviewAction::LineComment {
-                    pr_number: pr_num,
-                    path,
-                    line: line as u32,
-                });
-            }
-            return Ok(());
-        }
-
-        if KeyInput::is_down(key) {
-            self.diff_view_state.move_down();
-        } else if KeyInput::is_up(key) {
-            self.diff_view_state.move_up();
-        } else if KeyInput::is_fast_down(key) {
-            self.diff_view_state.move_down_n(5);
-        } else if KeyInput::is_fast_up(key) {
-            self.diff_view_state.move_up_n(5);
-        } else if KeyInput::is_page_down(key) {
-            self.diff_view_state.page_down(20);
-        } else if KeyInput::is_page_up(key) {
-            self.diff_view_state.page_up(20);
-        } else if KeyInput::is_top(key) {
-            self.diff_view_state.go_top();
-        } else if KeyInput::is_bottom(key) {
-            self.diff_view_state.go_bottom();
-        }
-
-        Ok(())
     }
 
     fn on_focus_change(&mut self) {
