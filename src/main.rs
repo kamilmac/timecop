@@ -22,9 +22,9 @@ use std::time::Duration;
 use app::{App, AppCommand};
 use event::{AppEvent, EventHandler};
 
-/// Kimchi - AI-native code review TUI
+/// TimeCop - AI-native code review TUI
 #[derive(Parser, Debug)]
-#[command(name = "kimchi")]
+#[command(name = "timecop")]
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Path to git repository

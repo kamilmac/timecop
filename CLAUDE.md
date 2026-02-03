@@ -21,7 +21,7 @@ No tests currently exist.
 
 ## Architecture
 
-Kimchi is a TUI code review app built with Rust/Ratatui for reviewing GitHub PRs.
+TimeCop is a TUI code review app built with Rust/Ratatui for reviewing GitHub PRs.
 
 ### Core Concepts
 

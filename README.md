@@ -1,10 +1,9 @@
-# Kimchi
+# TimeCop
 
 Terminal UI for reviewing code changes. Built for the AI coding era.
 
-<p>
-  <img src="screenshots/diff-view.png" width="49%" />
-  <img src="screenshots/pr-view.png" width="49%" />
+<p align="center">
+  <img src="screenshots/timecop.png" width="600" />
 </p>
 
 ## Why
@@ -17,7 +16,7 @@ Traditional tools don't fit this workflow:
 2. **Context switching kills flow.** Browser for PRs, terminal for code, editor for fixes. Too much friction.
 3. **Code review is the job now.** When agents write, you review. The diff is the artifact, not the source file.
 
-Kimchi sits next to your coding agent. Watch changes happen in real-time, scroll through commit history, review PRs — all without leaving the terminal.
+TimeCop sits next to your coding agent. Watch changes happen in real-time, scroll through commit history, review PRs — all without leaving the terminal.
 
 ## Features
 
@@ -31,10 +30,10 @@ Kimchi sits next to your coding agent. Watch changes happen in real-time, scroll
 ## Install
 
 ```bash
-git clone https://github.com/kmacinski/kimchi
-cd kimchi
+git clone https://github.com/kmacinski/timecop
+cd timecop
 cargo build --release
-cp target/release/kimchi ~/.local/bin/
+cp target/release/timecop ~/.local/bin/
 ```
 
 ## Requirements
@@ -45,8 +44,8 @@ cp target/release/kimchi ~/.local/bin/
 ## Usage
 
 ```bash
-kimchi              # current directory
-kimchi /path/to/repo
+timecop              # current directory
+timecop /path/to/repo
 ```
 
 Run it alongside your coding agent. Changes refresh automatically.
@@ -91,7 +90,7 @@ Use `,` to go back in history, `.` to go forward. The selected position glows re
 ## Workflow
 
 1. Start your coding agent in one terminal
-2. Run `kimchi` in another
+2. Run `timecop` in another
 3. Watch changes appear in real-time as agent works
 4. Use timeline to review individual commits
 5. Press `o` to open files in your editor for quick fixes

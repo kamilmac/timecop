@@ -1,8 +1,8 @@
-# Kimchi Architecture
+# TimeCop Architecture
 
 ## Overview
 
-Kimchi is a terminal UI for code review built with Rust and Ratatui.
+TimeCop is a terminal UI for code review built with Rust and Ratatui.
 
 ## Component Architecture
 
@@ -390,13 +390,13 @@ Application logging is configured via the `RUST_LOG` environment variable:
 
 ```bash
 # Default: warnings only
-kimchi
+timecop
 
 # Enable debug logging
-RUST_LOG=debug kimchi
+RUST_LOG=debug timecop
 
 # Enable trace logging for async_loader
-RUST_LOG=kimchi::async_loader=trace kimchi
+RUST_LOG=timecop::async_loader=trace timecop
 ```
 
 Log messages are written to stderr and include:

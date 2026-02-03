@@ -862,28 +862,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kimchi"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "arboard",
- "clap",
- "crossterm",
- "env_logger",
- "git2",
- "ignore",
- "log",
- "notify",
- "notify-debouncer-mini",
- "ratatui",
- "serde",
- "serde_json",
- "syntect",
- "thiserror",
- "unicode-width 0.2.0",
-]
-
-[[package]]
 name = "kqueue"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1647,6 +1625,28 @@ dependencies = [
  "quick-error",
  "weezl",
  "zune-jpeg",
+]
+
+[[package]]
+name = "timecop"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "clap",
+ "crossterm",
+ "env_logger",
+ "git2",
+ "ignore",
+ "log",
+ "notify",
+ "notify-debouncer-mini",
+ "ratatui",
+ "serde",
+ "serde_json",
+ "syntect",
+ "thiserror",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]

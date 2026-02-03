@@ -1,4 +1,4 @@
-# Kimchi Design Document
+# TimeCop Design Document
 
 A terminal user interface for code review and repository browsing, built with Rust and Ratatui.
 
@@ -413,7 +413,7 @@ Uses `env_logger` for debugging background tasks:
 RUST_LOG=debug cargo run
 
 # Log levels: error, warn, info, debug, trace
-RUST_LOG=kimchi=debug cargo run
+RUST_LOG=timecop=debug cargo run
 ```
 
 Logged events:
