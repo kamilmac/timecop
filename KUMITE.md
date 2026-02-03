@@ -16,3 +16,9 @@
 - Submission
 - Ring out
 
+
+## Notable Champions
+- Chong Li (1985-1987)
+- Frank Dux (1988)
+- Jackson (1989)
+
