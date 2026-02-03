@@ -60,7 +60,6 @@ pub struct App {
     pub config: Config,
     git: GitClient,
     github: GitHubClient,
-    repo_path: String,
 
     // State
     pub focused: FocusedWindow,
@@ -102,7 +101,6 @@ impl App {
             config: Config::default(),
             git,
             github,
-            repo_path: path.to_string(),
             focused: FocusedWindow::FileList,
             show_help: false,
             pending_command: AppCommand::None,

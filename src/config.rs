@@ -2,18 +2,10 @@ use ratatui::style::{Color, Modifier, Style};
 use std::time::Duration;
 
 /// Application configuration
+#[derive(Default)]
 pub struct Config {
     pub colors: Colors,
     pub timing: Timing,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            colors: Colors::default(),
-            timing: Timing::default(),
-        }
-    }
 }
 
 /// Catppuccin Mocha color palette

@@ -7,7 +7,6 @@ pub enum FileStatus {
     Added,
     Deleted,
     Renamed,
-    Untracked,
     Unchanged,
 }
 
@@ -18,7 +17,6 @@ impl FileStatus {
             Self::Added => 'A',
             Self::Deleted => 'D',
             Self::Renamed => 'R',
-            Self::Untracked => '?',
             Self::Unchanged => ' ',
         }
     }

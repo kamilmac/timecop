@@ -28,7 +28,6 @@ pub struct Review {
 pub struct Comment {
     pub author: String,
     pub body: String,
-    pub path: Option<String>,
     pub line: Option<u32>,
     pub original_line: Option<u32>,
     pub side: Option<String>, // "LEFT" or "RIGHT"
@@ -136,7 +135,6 @@ impl GitHubClient {
             let comment = Comment {
                 author: c.user.login,
                 body: c.body,
-                path: c.path.clone(),
                 line: c.line,
                 original_line: c.original_line,
                 side: c.side,

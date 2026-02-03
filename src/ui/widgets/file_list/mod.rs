@@ -441,7 +441,6 @@ fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'sta
             FileStatus::Added => colors.style_added(),
             FileStatus::Deleted => colors.style_removed(),
             FileStatus::Renamed => Style::default().fg(colors.renamed),
-            FileStatus::Untracked => colors.style_muted(),
             FileStatus::Unchanged => colors.style_muted(),
         };
         spans.push(Span::raw(" ".to_string()));
