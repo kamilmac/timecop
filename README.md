@@ -9,13 +9,24 @@ Terminal UI for reviewing code changes. Built for the AI coding era.
 
 ## Why
 
-AI agents commit faster than you can review. This creates problems:
+Coding agents changed how we write code. They commit fast, iterate fast, produce more code than ever. **Reviews are the new bottleneck.**
 
-1. **Working tree diff is useless.** Agents commit often. You need diff against base branch — the full picture.
-2. **PRs need faster access.** More code, more reviews. Browser switching kills flow.
-3. **Code is secondary.** When agents write, you review. The diff is the artifact, not the source file.
+Traditional tools don't fit this workflow:
 
-Kimchi sits next to your AI agent. Shows changes, refreshes automatically, PRs are a keystroke away.
+1. **Working tree diff is useless.** Agents commit constantly. You need the full picture — diff against base branch.
+2. **Context switching kills flow.** Browser for PRs, terminal for code, editor for fixes. Too much friction.
+3. **Code review is the job now.** When agents write, you review. The diff is the artifact, not the source file.
+
+Kimchi sits next to your coding agent. Watch changes happen in real-time, scroll through commit history, review PRs — all without leaving the terminal.
+
+## Features
+
+- **Real-time file watching** — See changes as your agent writes code
+- **Timeline navigation** — Scroll through commit history with `,` and `.`
+- **Split or unified diff** — Toggle with `s`, auto-switches based on terminal width
+- **PR workflow** — List PRs, view details, approve/comment without browser
+- **Syntax highlighting** — Full language support in diff views
+- **Open in editor** — Jump to exact line with `o`
 
 ## Install
 
@@ -38,19 +49,23 @@ kimchi              # current directory
 kimchi /path/to/repo
 ```
 
+Run it alongside your coding agent. Changes refresh automatically.
+
 ## Keys
 
 | Key | Action |
 |-----|--------|
 | `j/k` | Navigate |
-| `J/K` | Fast scroll |
-| `h/l` | Scroll diff horizontally |
-| `g/G` | Top/bottom |
-| `Tab` | Switch panes |
-| `,/.` | Timeline: older/newer |
-| `y` | Copy path |
-| `o` | Open in $EDITOR |
-| `Enter` | Open diff / checkout PR |
+| `J/K` | Fast scroll (5 lines) |
+| `g/G` | Jump to top/bottom |
+| `h/l` | Collapse/expand folders |
+| `Tab` | Cycle panes (Files → Preview → PRs) |
+| `s` | Toggle split/unified diff |
+| `,/.` | Timeline: older/newer commit |
+| `o` | Open in $EDITOR at current line |
+| `y` | Copy file path |
+| `Enter` | Open diff / checkout PR branch |
+| `r` | Refresh |
 | `?` | Help |
 | `q` | Quit |
 
@@ -58,18 +73,29 @@ kimchi /path/to/repo
 
 ## Timeline
 
-Navigate through your branch history:
+The TIMECOP header is your timeline. Navigate through branch history:
 
 ```
-○─○─○─✱─◆
-│ │ │ │ └─ all changes (base → head)
-│ │ │ └─── uncommitted changes
-│ │ └───── commit -1
-│ └─────── commit -2
-└───────── commit -3
+◆─◆─T─I─M─E─C─O─P─◆─◆
+                  │ └── wip (uncommitted changes)
+                  └──── all changes (base → HEAD) ← default
+              └──────── -1 (latest commit)
+          └──────────── -2
+      └──────────────── -3 ... -9
 ```
 
-Use `,` to go back in history, `.` to go forward. See exactly what changed in each commit.
+Use `,` to go back in history, `.` to go forward. The selected position glows red. A label shows your current view: "wip", "all changes", or "-N".
+
+**Use case:** Agent made 5 commits. Step through each one to understand the changes, then view "all changes" for the complete picture before approving.
+
+## Workflow
+
+1. Start your coding agent in one terminal
+2. Run `kimchi` in another
+3. Watch changes appear in real-time as agent works
+4. Use timeline to review individual commits
+5. Press `o` to open files in your editor for quick fixes
+6. When done, press `a` to approve the PR
 
 ## License
 
