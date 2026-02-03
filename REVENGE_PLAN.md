@@ -10,3 +10,9 @@
 - Leg conditioning with bamboo
 - Coconut tree kicks
 
+
+## Phase 3: Hands in Glass
+- Ancient ritual binding
+- Broken glass coating
+- Resin hardening
+
