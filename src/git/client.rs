@@ -38,16 +38,19 @@ impl GitClient {
     }
 
     /// Detect the base branch (main, master, etc.)
+    /// Prefers origin/main over local main to match GitHub's behavior
     fn detect_base_branch(&self) -> Option<String> {
-        // Try common branch names
+        // Prefer remote branches (matches GitHub PR behavior)
         for name in &["main", "master"] {
-            if self.repo.find_branch(name, git2::BranchType::Local).is_ok() {
-                return Some(name.to_string());
-            }
-            // Try remote
             let remote_name = format!("origin/{}", name);
             if self.repo.find_reference(&format!("refs/remotes/{}", remote_name)).is_ok() {
                 return Some(remote_name);
+            }
+        }
+        // Fall back to local branches
+        for name in &["main", "master"] {
+            if self.repo.find_branch(name, git2::BranchType::Local).is_ok() {
+                return Some(name.to_string());
             }
         }
         None
