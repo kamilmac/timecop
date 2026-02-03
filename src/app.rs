@@ -890,17 +890,23 @@ impl App {
         // Fixed width for label (longest is "all changes" = 11 chars)
         const LABEL_WIDTH: usize = 11;
         let padded_label = format!("  {:width$}", state_label, width = LABEL_WIDTH);
-        let label_total = 2 + LABEL_WIDTH; // "  " + label
 
-        // Center the timeline itself, label goes to its right
+        // Help hint on the right
+        let help_hint = "? help";
+        let help_hint_width = help_hint.len() + 2; // " ? help "
+
+        // Center the timeline, state label to right, help hint at far right
         let logo_width = elements.iter().map(|s| s.chars().count()).sum::<usize>();
-        let left_pad = total_width.saturating_sub(logo_width) / 2;
-        let right_pad = total_width.saturating_sub(logo_width + left_pad + label_total);
+        let label_width = 2 + LABEL_WIDTH;
+        let content_width = logo_width + label_width + help_hint_width;
+        let left_pad = total_width.saturating_sub(content_width) / 2;
+        let right_pad = total_width.saturating_sub(logo_width + left_pad + label_width + help_hint_width);
 
         let mut line_spans = vec![Span::raw(" ".repeat(left_pad))];
         line_spans.extend(spans);
         line_spans.push(Span::styled(padded_label, dim_style));
         line_spans.push(Span::raw(" ".repeat(right_pad)));
+        line_spans.push(Span::styled(format!(" {} ", help_hint), dim_style));
 
         frame.render_widget(Line::from(line_spans), area);
     }
@@ -916,9 +922,6 @@ impl App {
         } else {
             format!(" {}", self.branch)
         };
-
-        // Center: contextual hint
-        let hint = self.contextual_hint();
 
         // Right: position info
         let right_content = match self.timeline_position {
@@ -940,35 +943,15 @@ impl App {
         };
 
         let left_width = left_content.chars().count();
-        let hint_width = hint.chars().count();
         let right_width = right_content.chars().count();
-
-        // Calculate padding to center the hint
-        let total_used = left_width + hint_width + right_width;
-        let remaining = total_width.saturating_sub(total_used);
-        let left_pad = remaining / 2;
-        let right_pad = remaining.saturating_sub(left_pad);
-
-        let hint_style = ratatui::style::Style::default()
-            .fg(ratatui::style::Color::Rgb(120, 120, 120));
+        let padding = total_width.saturating_sub(left_width + right_width);
 
         let line = Line::from(vec![
             Span::styled(left_content, colors.style_status_bar()),
-            Span::styled(" ".repeat(left_pad), colors.style_status_bar()),
-            Span::styled(hint, hint_style),
-            Span::styled(" ".repeat(right_pad), colors.style_status_bar()),
+            Span::styled(" ".repeat(padding), colors.style_status_bar()),
             Span::styled(right_content, colors.style_status_bar()),
         ]);
         frame.render_widget(line, area);
-    }
-
-    /// Get contextual hint based on current focus
-    fn contextual_hint(&self) -> String {
-        match self.focused {
-            FocusedWindow::FileList => "j/k:nav  Enter:preview  ,:older  .:newer  ?:help".to_string(),
-            FocusedWindow::Preview => "j/k:scroll  c:comment  s:split/unified  Esc:back".to_string(),
-            FocusedWindow::PrList => "j/k:nav  Enter:checkout  o:browser  a:approve  ?:help".to_string(),
-        }
     }
 
     /// Generate file list title
