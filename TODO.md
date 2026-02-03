@@ -26,15 +26,13 @@ Separating concerns makes DiffView more focused and scalable:
 
 ### Preview Pane Focus ✓
 
-- [x] Add Preview to tab cycle (Tab: FileList → PrList → Preview → ...)
+- [x] Add Preview to tab cycle (Tab: Files → Preview → PRs, clockwise)
 
-### Context-Dependent Preview Behavior
+### Context-Dependent Preview Behavior ✓
 
-Preview shows different content based on left pane:
-- **From FileList** → DiffView (file diff)
-  - Scroll, line comments, "s" mode toggle, "o" open editor
-- **From PrList** → PrDetailsView (PR info)
-  - Scroll only, no line-specific actions
+Preview shows different content based on context:
+- [x] **From FileList** → DiffView (file diff with full interaction)
+- [x] **From PrList** → PrDetailsView (PR info, scroll only)
 
 ---
 
