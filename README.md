@@ -2,9 +2,7 @@
 
 Terminal UI for reviewing code changes. Built for the AI coding era.
 
-<p align="center">
-  <img src="screenshots/timecop.png" height="250" />
-</p>
+<img src="screenshots/timecop.png" height="350" />
 
 ## Why
 
