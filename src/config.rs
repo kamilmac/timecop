@@ -86,14 +86,14 @@ impl Colors {
             modified: Color::Rgb(160, 80, 0),
             renamed: Color::Rgb(90, 20, 180),
             header: Color::Rgb(0, 60, 180),
-            muted: Color::Rgb(60, 60, 70),
+            muted: Color::Rgb(120, 120, 135),      // Lighter gray for dimmed text
             text: Color::Rgb(10, 10, 15),
-            border: Color::Rgb(150, 155, 170),
+            border: Color::Rgb(180, 185, 195),     // Lighter border
             border_focused: Color::Rgb(0, 60, 180),
-            status_bar: Color::Rgb(220, 225, 235),
+            status_bar: Color::Rgb(235, 238, 245),
             status_bar_text: Color::Rgb(10, 10, 15),
             comment: Color::Rgb(160, 80, 0),
-            comment_bg: Color::Rgb(255, 245, 220),
+            comment_bg: Color::Rgb(255, 248, 230),
             logo_primary: Color::Rgb(0, 90, 30),
             logo_highlight: Color::Rgb(160, 0, 0),
         }
