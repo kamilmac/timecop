@@ -64,14 +64,15 @@ TimeCop uses `simplify_first_parent()` to walk only the main line of your branch
 
 ```
 Timeline (left to right):
-T─I─M─E─C─O─P─○─○─○─○─[all]─[wip]
-              │ │ │ │   │     │
-              │ │ │ │   │     └─ uncommitted changes (HEAD → workdir)
-              │ │ │ │   └─────── all commits (merge-base → HEAD)
-              │ │ │ └─────────── -1 (HEAD~1 → HEAD)
-              │ │ └───────────── -2 (HEAD~2 → HEAD~1)
-              │ └─────────────── -3 (HEAD~3 → HEAD~2)
-              └───────────────── -4 (HEAD~4 → HEAD~3)
+T─I─M─E─C─O─P─○─○─○─○─[all]─[all+]─[wip]
+              │ │ │ │   │      │      │
+              │ │ │ │   │      │      └─ uncommitted changes (HEAD → workdir)
+              │ │ │ │   │      └──────── all + suggested files (co-change analysis)
+              │ │ │ │   └──────────────── all commits (merge-base → HEAD)
+              │ │ │ └────────────────── -1 (HEAD~1 → HEAD)
+              │ │ └──────────────────── -2 (HEAD~2 → HEAD~1)
+              │ └────────────────────── -3 (HEAD~3 → HEAD~2)
+              └──────────────────────── -4 (HEAD~4 → HEAD~3)
 ```
 
 ### Position: `wip`
@@ -90,6 +91,17 @@ All committed changes since branching
   merge-base ─────────── HEAD
        │                   │
        └── diff shows ─────┘
+```
+
+### Position: `all+`
+```
+All committed changes + suggested related files
+
+Same diff as `all`, but the file list also includes
+files that frequently change together with your modified
+files (based on co-change analysis of recent history).
+
+Suggested files are marked with ◇ in the file list.
 ```
 
 ### Position: `-1`

@@ -35,6 +35,8 @@ pub struct StatusEntry {
     pub status: FileStatus,
     /// True if file has uncommitted changes
     pub uncommitted: bool,
+    /// True if this is a suggested related file (co-change analysis)
+    pub suggested: bool,
 }
 
 
@@ -46,12 +48,15 @@ pub struct DiffStats {
 }
 
 /// Timeline position for viewing PR history
-/// Order: Wip → FullDiff → -1 → -2 → ... → -16
+/// Visual order (left to right): -N → ... → -1 → [all] → [all+] → [wip]
+/// Navigation: , moves left (older), . moves right (newer)
 /// FullDiff is the default (primary code review view)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimelinePosition {
     /// View only uncommitted changes: HEAD → working tree
     Wip,
+    /// View all changes + suggested related files (co-change analysis)
+    FullDiffExtended,
     /// View all committed changes: base → HEAD (default)
     #[default]
     FullDiff,
@@ -60,10 +65,11 @@ pub enum TimelinePosition {
 }
 
 impl TimelinePosition {
-    /// Move to next position (towards older commits: Wip → FullDiff → -1 → -2 → ...)
+    /// Move to next position (towards older/left: Wip → FullDiffExtended → FullDiff → -1 → ...)
     pub fn next(self, max_commits: usize) -> Self {
         match self {
-            Self::Wip => Self::FullDiff,
+            Self::Wip => Self::FullDiffExtended,
+            Self::FullDiffExtended => Self::FullDiff,
             Self::FullDiff => {
                 if max_commits > 0 {
                     Self::CommitDiff(1)
@@ -76,11 +82,12 @@ impl TimelinePosition {
         }
     }
 
-    /// Move to previous position (towards newer: ... → -1 → FullDiff → Wip)
+    /// Move to previous position (towards newer/right: ... → -1 → FullDiff → FullDiffExtended → Wip)
     pub fn prev(self) -> Self {
         match self {
             Self::Wip => Self::Wip, // Can't go newer than wip
-            Self::FullDiff => Self::Wip,
+            Self::FullDiffExtended => Self::Wip,
+            Self::FullDiff => Self::FullDiffExtended,
             Self::CommitDiff(1) => Self::FullDiff,
             Self::CommitDiff(n) => Self::CommitDiff(n - 1),
         }

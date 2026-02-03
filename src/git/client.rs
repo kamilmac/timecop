@@ -99,7 +99,7 @@ impl GitClient {
             };
 
             let uncommitted = uncommitted_paths.contains(&path);
-            entries.push(StatusEntry { path: path.clone(), status, uncommitted });
+            entries.push(StatusEntry { path: path.clone(), status, uncommitted, suggested: false });
             seen_paths.insert(path);
         }
 
@@ -112,6 +112,7 @@ impl GitClient {
                     path: path.clone(),
                     status,
                     uncommitted: true,
+                    suggested: false,
                 });
             }
         }
@@ -169,6 +170,7 @@ impl GitClient {
                 path,
                 status,
                 uncommitted: true,
+                suggested: false,
             });
         }
 
@@ -292,7 +294,8 @@ impl GitClient {
         use super::TimelinePosition;
 
         let diff = match position {
-            TimelinePosition::FullDiff => {
+            TimelinePosition::FullDiff | TimelinePosition::FullDiffExtended => {
+                // FullDiffExtended shows same diff stats as FullDiff (suggestions don't add to stats)
                 let base = match &self.base_branch {
                     Some(b) => b,
                     None => return Ok(DiffStats::default()),
@@ -422,13 +425,15 @@ impl GitClient {
         opts.pathspec(path);
 
         match position {
-            TimelinePosition::FullDiff => {
+            TimelinePosition::FullDiff | TimelinePosition::FullDiffExtended => {
                 // Base to HEAD (all committed changes)
+                // For FullDiffExtended, suggested files will show empty diff (they aren't changed)
                 let head_tree = self.repo.head()?.peel_to_tree()?;
                 let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
                 let result = self.diff_to_string(&diff)?;
                 if result.is_empty() {
-                    return self.format_new_file(path);
+                    // For suggested files, show helpful message instead of treating as new file
+                    return Ok(format!("# {} (suggested related file - no changes in this PR)\n", path));
                 }
                 Ok(result)
             }
@@ -465,6 +470,14 @@ impl GitClient {
             TimelinePosition::FullDiff => {
                 // Show all committed changes: base → HEAD
                 self.status()
+            }
+            TimelinePosition::FullDiffExtended => {
+                // Show all changes + suggested related files
+                let mut entries = self.status()?;
+                let changed_paths: Vec<String> = entries.iter().map(|e| e.path.clone()).collect();
+                let mut suggestions = self.find_related_files(&changed_paths, 10)?;
+                entries.append(&mut suggestions);
+                Ok(entries)
             }
             TimelinePosition::Wip => {
                 // Show ONLY uncommitted changes: HEAD → working tree
@@ -503,6 +516,7 @@ impl GitClient {
                         path,
                         status,
                         uncommitted: false,
+                        suggested: false,
                     });
                 }
 
@@ -510,5 +524,84 @@ impl GitClient {
                 Ok(entries)
             }
         }
+    }
+
+    /// Find files that frequently change together with the given files (co-change analysis)
+    /// Returns a list of suggested files with their co-change frequency
+    pub fn find_related_files(&self, changed_files: &[String], max_suggestions: usize) -> Result<Vec<StatusEntry>> {
+        use std::collections::HashMap;
+
+        let mut cochange_count: HashMap<String, usize> = HashMap::new();
+        let changed_set: HashSet<String> = changed_files.iter().cloned().collect();
+
+        // Look at recent commits (limit to avoid performance issues)
+        let head = self.repo.head()?.peel_to_commit()?;
+        let mut revwalk = self.repo.revwalk()?;
+        revwalk.push(head.id())?;
+        revwalk.simplify_first_parent()?;
+
+        let commits_to_check = 100; // Check last 100 commits
+        let mut checked = 0;
+
+        for oid in revwalk {
+            if checked >= commits_to_check {
+                break;
+            }
+            let oid = oid?;
+            let commit = self.repo.find_commit(oid)?;
+
+            // Get files changed in this commit
+            let tree = commit.tree()?;
+            let parent_tree = commit.parent(0).ok().and_then(|p| p.tree().ok());
+
+            let diff = self.repo.diff_tree_to_tree(
+                parent_tree.as_ref(),
+                Some(&tree),
+                None
+            )?;
+
+            let mut commit_files: Vec<String> = Vec::new();
+            diff.foreach(
+                &mut |delta, _| {
+                    if let Some(path) = delta.new_file().path() {
+                        commit_files.push(path.to_string_lossy().to_string());
+                    }
+                    true
+                },
+                None, None, None
+            )?;
+
+            // If this commit touches any of our changed files, count the other files
+            let touches_changed = commit_files.iter().any(|f| changed_set.contains(f));
+            if touches_changed {
+                for file in &commit_files {
+                    if !changed_set.contains(file) {
+                        *cochange_count.entry(file.clone()).or_insert(0) += 1;
+                    }
+                }
+            }
+
+            checked += 1;
+        }
+
+        // Sort by frequency and take top N
+        let mut suggestions: Vec<_> = cochange_count.into_iter().collect();
+        suggestions.sort_by(|a, b| b.1.cmp(&a.1));
+
+        // Only suggest files that co-changed at least twice
+        let min_cochange = 2;
+        let result: Vec<StatusEntry> = suggestions
+            .into_iter()
+            .filter(|(_, count)| *count >= min_cochange)
+            .take(max_suggestions)
+            .map(|(path, _)| StatusEntry {
+                path,
+                status: FileStatus::Unchanged,
+                uncommitted: false,
+                suggested: true,
+            })
+            .collect();
+
+        Ok(result)
     }
 }

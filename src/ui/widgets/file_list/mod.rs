@@ -25,6 +25,7 @@ pub struct TreeEntry {
     pub depth: usize,
     pub status: FileStatus,
     pub uncommitted: bool,
+    pub suggested: bool,
     pub collapsed: bool,
     pub children: Vec<String>,
     pub has_comments: bool,
@@ -224,6 +225,7 @@ fn build_tree(
         depth: 0,
         status: FileStatus::Unchanged,
         uncommitted: false,
+        suggested: false,
         collapsed: collapsed.contains(""),
         children: all_paths,
         has_comments: false,
@@ -328,6 +330,16 @@ fn flatten_tree(
             files.iter().any(|f| f.path == node.path && f.uncommitted)
         };
 
+        // Check if this is a suggested file (co-change analysis)
+        let suggested = if node.is_dir {
+            // For directories, check if any child is suggested
+            children.iter().any(|child_path| {
+                files.iter().any(|f| &f.path == child_path && f.suggested)
+            })
+        } else {
+            files.iter().any(|f| f.path == node.path && f.suggested)
+        };
+
         entries.push(TreeEntry {
             display: node.name.clone(),
             path: node.path.clone(),
@@ -336,6 +348,7 @@ fn flatten_tree(
             depth,
             status: node.status,
             uncommitted,
+            suggested,
             collapsed: is_collapsed,
             children,
             has_comments: node_has_comments,
@@ -459,6 +472,12 @@ fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'sta
     if entry.uncommitted {
         spans.push(Span::raw(" ".to_string()));
         spans.push(Span::styled("●".to_string(), colors.style_modified()));
+    }
+
+    // Suggested file indicator (co-change analysis)
+    if entry.suggested {
+        spans.push(Span::raw(" ".to_string()));
+        spans.push(Span::styled("◇".to_string(), colors.style_muted()));
     }
 
     // Comment indicator

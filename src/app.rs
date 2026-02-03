@@ -912,8 +912,8 @@ impl App {
             .fg(colors.muted);
 
         // Timeline layout (left to right):
-        // T─I─M─E─C─O─P─○─○─○─○─○─○─○─○─○─○─○─○─[all]─[wip]
-        //               -12...............-1   all   wip
+        // T─I─M─E─C─O─P─○─○─○─○─○─○─○─○─○─○─○─○─[all]─[all+]─[wip]
+        //               -12...............-1   all   all+   wip
 
         let mut spans = Vec::new();
 
@@ -947,6 +947,13 @@ impl App {
         spans.push(Span::styled("]", primary_bold));
         spans.push(Span::styled("─", primary_bold));
 
+        // [all+] marker (extended with suggestions)
+        let all_ext_selected = matches!(self.timeline_position, TimelinePosition::FullDiffExtended);
+        spans.push(Span::styled("[", primary_bold));
+        spans.push(Span::styled("all+", if all_ext_selected { highlight_bold } else { primary_bold }));
+        spans.push(Span::styled("]", primary_bold));
+        spans.push(Span::styled("─", primary_bold));
+
         // [wip] marker
         let wip_selected = matches!(self.timeline_position, TimelinePosition::Wip);
         spans.push(Span::styled("[", primary_bold));
@@ -957,6 +964,7 @@ impl App {
         let state_label = match self.timeline_position {
             TimelinePosition::Wip => "wip",
             TimelinePosition::FullDiff => "all changes",
+            TimelinePosition::FullDiffExtended => "all+",
             TimelinePosition::CommitDiff(n) => match n {
                 1 => "-1", 2 => "-2", 3 => "-3", 4 => "-4", 5 => "-5",
                 6 => "-6", 7 => "-7", 8 => "-8", 9 => "-9", 10 => "-10",
@@ -983,7 +991,7 @@ impl App {
         let total_width = area.width as usize;
 
         // Left: branch (+stats in full diff mode)
-        let left_content = if matches!(self.timeline_position, TimelinePosition::FullDiff)
+        let left_content = if matches!(self.timeline_position, TimelinePosition::FullDiff | TimelinePosition::FullDiffExtended)
             && (self.diff_stats.added > 0 || self.diff_stats.removed > 0) {
             format!(" {}  +{} -{}", self.branch, format_count(self.diff_stats.added), format_count(self.diff_stats.removed))
         } else {
@@ -993,6 +1001,7 @@ impl App {
         // Right: position info
         let right_content = match self.timeline_position {
             TimelinePosition::FullDiff => "all changes (base → head) ".to_string(),
+            TimelinePosition::FullDiffExtended => "all + suggested files ".to_string(),
             TimelinePosition::Wip => "uncommitted changes ".to_string(),
             TimelinePosition::CommitDiff(n) => {
                 if let Some(msg) = self.timeline_commit_message() {
