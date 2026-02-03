@@ -488,7 +488,13 @@ impl<'a> StatefulWidget for DiffView<'a> {
             let line = if diff_line.is_header {
                 render_header_line(diff_line, is_cursor, self.colors)
             } else if state.view_mode == DiffViewMode::Unified {
-                render_unified_diff_line(diff_line, is_cursor, self.colors)
+                let hl = match diff_line.line_type {
+                    LineType::Added => diff_line.right_num.and_then(|n| state.highlighted_right.get(&n)),
+                    LineType::Removed => diff_line.left_num.and_then(|n| state.highlighted_left.get(&n)),
+                    _ => diff_line.right_num.and_then(|n| state.highlighted_right.get(&n))
+                        .or_else(|| diff_line.left_num.and_then(|n| state.highlighted_left.get(&n))),
+                };
+                render_unified_diff_line(diff_line, hl, is_cursor, self.colors)
             } else if has_diff_highlighting {
                 let left_hl = diff_line.left_num.and_then(|n| state.highlighted_left.get(&n));
                 let right_hl = diff_line.right_num.and_then(|n| state.highlighted_right.get(&n));
@@ -769,56 +775,80 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
 }
 
 /// Render a diff line in unified mode (single pane, traditional +/- prefix)
-fn render_unified_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors) -> Line<'static> {
+fn render_unified_diff_line(
+    diff_line: &DiffLine,
+    highlight: Option<&Vec<(String, Style)>>,
+    cursor: bool,
+    colors: &Colors,
+) -> Line<'static> {
     let mut spans = vec![];
     let num_width = 4;
 
     // Show appropriate line number and prefix based on line type
-    let (prefix, line_num, text, style) = match diff_line.line_type {
+    let (prefix, line_num, text, base_style, bg_color) = match diff_line.line_type {
         LineType::Added => {
             let num = diff_line.right_num
                 .map(|n| format!("{:>width$}", n, width = num_width))
                 .unwrap_or_else(|| " ".repeat(num_width));
             let text = diff_line.right_text.as_deref().unwrap_or("");
-            ("+", num, text, colors.style_added())
+            ("+", num, text, colors.style_added(), Some(colors.added_bg))
         }
         LineType::Removed => {
             let num = diff_line.left_num
                 .map(|n| format!("{:>width$}", n, width = num_width))
                 .unwrap_or_else(|| " ".repeat(num_width));
             let text = diff_line.left_text.as_deref().unwrap_or("");
-            ("-", num, text, colors.style_removed())
+            ("-", num, text, colors.style_removed(), Some(colors.removed_bg))
         }
         LineType::Context => {
-            // For context, prefer right_num (new file line number)
             let num = diff_line.right_num.or(diff_line.left_num)
                 .map(|n| format!("{:>width$}", n, width = num_width))
                 .unwrap_or_else(|| " ".repeat(num_width));
             let text = diff_line.right_text.as_deref()
                 .or(diff_line.left_text.as_deref())
                 .unwrap_or("");
-            (" ", num, text, Style::default().fg(colors.text))
+            (" ", num, text, Style::default().fg(colors.text), None)
         }
         _ => {
-            // Headers etc - shouldn't reach here but handle gracefully
             let num = " ".repeat(num_width);
             let text = diff_line.left_text.as_deref().unwrap_or("");
-            (" ", num, text, Style::default().fg(colors.text))
+            (" ", num, text, Style::default().fg(colors.text), None)
         }
-    };
-
-    let text = text.replace('\t', "    ");
-
-    let content_style = if cursor {
-        style.add_modifier(ratatui::style::Modifier::REVERSED)
-    } else {
-        style
     };
 
     spans.push(Span::styled(line_num, colors.style_muted()));
     spans.push(Span::styled(" ", colors.style_muted()));
-    spans.push(Span::styled(prefix.to_string(), content_style));
-    spans.push(Span::styled(text, content_style));
+
+    // Prefix with base style
+    let prefix_style = if cursor {
+        base_style.add_modifier(ratatui::style::Modifier::REVERSED)
+    } else {
+        base_style
+    };
+    spans.push(Span::styled(prefix.to_string(), prefix_style));
+
+    // Content with syntax highlighting if available
+    if let Some(hl) = highlight {
+        for (hl_text, hl_style) in hl {
+            let text = hl_text.replace('\t', "    ");
+            let mut style = *hl_style;
+            if let Some(bg) = bg_color {
+                style = style.bg(bg);
+            }
+            if cursor {
+                style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+            }
+            spans.push(Span::styled(text, style));
+        }
+    } else {
+        let text = text.replace('\t', "    ");
+        let content_style = if cursor {
+            base_style.add_modifier(ratatui::style::Modifier::REVERSED)
+        } else {
+            base_style
+        };
+        spans.push(Span::styled(text, content_style));
+    }
 
     Line::from(spans)
 }
