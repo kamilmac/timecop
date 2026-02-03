@@ -269,4 +269,8 @@ impl KeyInput {
     pub fn is_timeline_prev(key: &KeyEvent) -> bool {
         key.code == KeyCode::Char('.') && key.modifiers == KeyModifiers::NONE
     }
+
+    pub fn is_toggle_view_mode(key: &KeyEvent) -> bool {
+        key.code == KeyCode::Char('s') && key.modifiers == KeyModifiers::NONE
+    }
 }
