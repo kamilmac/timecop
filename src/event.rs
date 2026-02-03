@@ -240,6 +240,14 @@ impl KeyInput {
         key.code == KeyCode::Enter
     }
 
+    pub fn is_space(key: &KeyEvent) -> bool {
+        key.code == KeyCode::Char(' ') && key.modifiers == KeyModifiers::NONE
+    }
+
+    pub fn is_select(key: &KeyEvent) -> bool {
+        Self::is_enter(key) || Self::is_space(key)
+    }
+
     pub fn is_escape(key: &KeyEvent) -> bool {
         key.code == KeyCode::Esc
     }

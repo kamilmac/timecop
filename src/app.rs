@@ -375,8 +375,8 @@ impl App {
             return Ok(());
         }
 
-        // Enter is context-sensitive
-        if KeyInput::is_enter(&key) {
+        // Enter/Space is context-sensitive
+        if KeyInput::is_select(&key) {
             match self.focused {
                 FocusedWindow::FileList => {
                     // Go to preview
