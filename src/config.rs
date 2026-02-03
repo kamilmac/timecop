@@ -237,23 +237,23 @@ impl Colors {
     /// Light theme (high contrast for light backgrounds)
     pub fn light() -> Self {
         Self {
-            added: Color::Rgb(30, 130, 30),        // Bold green
-            removed: Color::Rgb(190, 0, 40),       // Bold red
-            added_bg: Color::Rgb(215, 240, 215),   // Light green tint
-            removed_bg: Color::Rgb(255, 220, 225), // Light red tint
-            modified: Color::Rgb(180, 100, 0),     // Bold orange
-            renamed: Color::Rgb(110, 40, 200),     // Bold purple
-            header: Color::Rgb(20, 80, 200),       // Bold blue
-            muted: Color::Rgb(100, 100, 115),      // Darker gray
-            text: Color::Rgb(30, 30, 40),          // Near black text
-            border: Color::Rgb(170, 175, 190),     // Visible border
-            border_focused: Color::Rgb(20, 80, 200), // Bold blue
-            status_bar: Color::Rgb(225, 228, 235), // Light surface
-            status_bar_text: Color::Rgb(30, 30, 40), // Near black
-            comment: Color::Rgb(180, 100, 0),      // Bold orange
+            added: Color::Rgb(0, 110, 0),          // Dark green
+            removed: Color::Rgb(180, 0, 30),       // Dark red
+            added_bg: Color::Rgb(210, 245, 210),   // Light green tint
+            removed_bg: Color::Rgb(255, 215, 220), // Light red tint
+            modified: Color::Rgb(160, 80, 0),      // Dark orange
+            renamed: Color::Rgb(90, 20, 180),      // Dark purple
+            header: Color::Rgb(0, 60, 180),        // Dark blue
+            muted: Color::Rgb(60, 60, 70),         // Dark gray (not light!)
+            text: Color::Rgb(10, 10, 15),          // Almost black
+            border: Color::Rgb(150, 155, 170),     // Visible border
+            border_focused: Color::Rgb(0, 60, 180), // Dark blue
+            status_bar: Color::Rgb(220, 225, 235), // Light surface
+            status_bar_text: Color::Rgb(10, 10, 15), // Almost black
+            comment: Color::Rgb(160, 80, 0),       // Dark orange
             comment_bg: Color::Rgb(255, 245, 220), // Warm light
-            logo_primary: Color::Rgb(15, 100, 40),     // Bold green
-            logo_highlight: Color::Rgb(170, 10, 10),   // Bold red
+            logo_primary: Color::Rgb(0, 90, 30),       // Dark green
+            logo_highlight: Color::Rgb(160, 0, 0),     // Dark red
         }
     }
 }
