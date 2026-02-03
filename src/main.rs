@@ -42,7 +42,12 @@ fn main() -> Result<()> {
     let path = args.path.canonicalize().unwrap_or(args.path);
 
     // Create app first (fails early if not a git repo)
-    let mut app = App::new(path.to_str().unwrap_or("."))?;
+    let mut app = App::new(path.to_str().unwrap_or(".")).map_err(|_| {
+        anyhow::anyhow!(
+            "Not a git repository: {}\n\nTimeCop must be run inside a git repository.",
+            path.display()
+        )
+    })?;
 
     // Initialize terminal
     enable_raw_mode()?;
