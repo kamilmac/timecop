@@ -15,6 +15,7 @@ pub enum ReviewAction {
     RequestChanges { pr_number: u64 },
     Comment { pr_number: u64 },
     LineComment { pr_number: u64, path: String, line: u32 },
+    CheckoutPr { pr_number: u64, branch: String },
 }
 
 impl ReviewAction {
@@ -26,11 +27,20 @@ impl ReviewAction {
             Self::LineComment { pr_number, path, line } => {
                 format!("Comment on {}:{} - PR #{}", path, line, pr_number)
             }
+            Self::CheckoutPr { pr_number, .. } => format!("Checkout PR #{}", pr_number),
         }
     }
 
     pub fn needs_body(&self) -> bool {
-        !matches!(self, Self::Approve { .. })
+        matches!(self, Self::RequestChanges { .. } | Self::Comment { .. } | Self::LineComment { .. })
+    }
+
+    pub fn confirmation_message(&self) -> Option<&str> {
+        match self {
+            Self::Approve { .. } => Some("Are you sure you want to approve this PR?"),
+            Self::CheckoutPr { .. } => Some("Switch to this PR branch?"),
+            _ => None,
+        }
     }
 }
 
@@ -256,11 +266,12 @@ impl<'a> Widget for InputModal<'a> {
             let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
             paragraph.render(inner, buf);
         } else {
-            // Show confirmation prompt (for approve)
+            // Show confirmation prompt
+            let confirm_msg = action.confirmation_message().unwrap_or("Confirm action?");
             let mut lines = vec![
                 Line::from(""),
                 Line::from(Span::styled(
-                    "Are you sure you want to approve this PR?",
+                    confirm_msg.to_string(),
                     ratatui::style::Style::default().fg(self.colors.text),
                 )),
                 Line::from(""),

@@ -486,12 +486,17 @@ impl<'a> StatefulWidget for DiffView<'a> {
         block.render(area, buf);
 
         if state.lines.is_empty() {
-            let msg = match &state.content {
-                PreviewContent::Empty => "Select a file to view",
-                _ => "No content",
+            let (msg, hint) = match &state.content {
+                PreviewContent::Empty => ("Select a file to view diff", "Press ? for help"),
+                _ => ("No changes", ""),
             };
             let line = Line::from(Span::styled(msg, self.colors.style_muted()));
             buf.set_line(inner.x, inner.y, &line, inner.width);
+
+            if !hint.is_empty() && inner.height > 2 {
+                let hint_line = Line::from(Span::styled(hint, self.colors.style_muted()));
+                buf.set_line(inner.x, inner.y + 2, &hint_line, inner.width);
+            }
             return;
         }
 

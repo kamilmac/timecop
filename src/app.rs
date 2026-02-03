@@ -28,20 +28,20 @@ pub enum FocusedWindow {
 }
 
 impl FocusedWindow {
-    /// Tab cycles through all panes (clockwise: Files → Preview → PRs)
+    /// Tab cycles through all panes (visual order: Files → PRs → Preview)
     pub fn next(self) -> Self {
         match self {
-            Self::FileList => Self::Preview,
-            Self::Preview => Self::PrList,
-            Self::PrList => Self::FileList,
+            Self::FileList => Self::PrList,
+            Self::PrList => Self::Preview,
+            Self::Preview => Self::FileList,
         }
     }
 
     pub fn prev(self) -> Self {
         match self {
-            Self::FileList => Self::PrList,
-            Self::PrList => Self::Preview,
-            Self::Preview => Self::FileList,
+            Self::FileList => Self::Preview,
+            Self::Preview => Self::PrList,
+            Self::PrList => Self::FileList,
         }
     }
 }
@@ -51,6 +51,35 @@ impl FocusedWindow {
 pub enum AppCommand {
     None,
     OpenEditor { path: String, line: Option<usize> },
+}
+
+/// Toast notification for temporary messages
+pub struct Toast {
+    pub message: String,
+    pub is_error: bool,
+    pub created_at: Instant,
+}
+
+impl Toast {
+    pub fn success(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            is_error: false,
+            created_at: Instant::now(),
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            is_error: true,
+            created_at: Instant::now(),
+        }
+    }
+
+    pub fn is_expired(&self) -> bool {
+        self.created_at.elapsed() > Duration::from_secs(3)
+    }
 }
 
 /// Main application state
@@ -73,6 +102,11 @@ pub struct App {
     pub diff_stats: DiffStats,
     pub selected_pr: Option<PrInfo>,
 
+    // Notifications
+    pub toast: Option<Toast>,
+    pub gh_available: bool,
+    pub tick_count: usize,
+
     // Async loading
     async_loader: AsyncLoader,
     last_pr_list_poll: Instant,
@@ -91,7 +125,10 @@ pub struct App {
 impl App {
     pub fn new(path: &str) -> Result<Self> {
         let git = GitClient::open(path)?;
-        let github = GitHubClient::new();
+        let mut github = GitHubClient::new();
+
+        // Check gh CLI availability upfront
+        let gh_available = github.is_available();
 
         let branch = git.current_branch().unwrap_or_else(|_| "HEAD".to_string());
 
@@ -109,6 +146,9 @@ impl App {
             branch,
             diff_stats: DiffStats::default(),
             selected_pr: None,
+            toast: None,
+            gh_available,
+            tick_count: 0,
             async_loader: AsyncLoader::new(),
             last_pr_list_poll: Instant::now() - pr_poll_interval - Duration::from_secs(1), // Force immediate load
             file_list_state: FileListState::new(),
@@ -118,6 +158,11 @@ impl App {
             input_modal_state: InputModalState::new(),
             highlighter: Highlighter::new(),
         };
+
+        // Show warning if gh CLI is not available
+        if !gh_available {
+            app.toast = Some(Toast::error("gh CLI not found - PR features disabled"));
+        }
 
         // Initialize PR list panel with current branch
         app.pr_list_panel_state.set_current_branch(app.branch.clone());
@@ -139,6 +184,16 @@ impl App {
         // Load files based on timeline position
         let files = self.git.status_at_position(self.timeline_position)?;
         self.file_list_state.set_files(files);
+
+        // Auto-select first file if cursor is at root and there are files
+        // (Skip root "./" entry at index 0, select first actual file at index 1+)
+        if self.file_list_state.cursor == 0 && self.file_list_state.entries.len() > 1 {
+            // Find first non-directory entry, or first entry after root
+            let first_file_idx = self.file_list_state.entries.iter()
+                .position(|e| !e.is_dir && !e.is_root)
+                .unwrap_or(1);
+            self.file_list_state.cursor = first_file_idx.min(self.file_list_state.entries.len() - 1);
+        }
 
         // Compute full diff stats on branch change or if not yet calculated
         if branch_changed || (self.diff_stats.added == 0 && self.diff_stats.removed == 0) {
@@ -210,6 +265,15 @@ impl App {
 
     /// Handle tick event - periodic updates
     pub fn handle_tick(&mut self) {
+        self.tick_count = self.tick_count.wrapping_add(1);
+
+        // Clear expired toasts
+        if let Some(ref toast) = self.toast {
+            if toast.is_expired() {
+                self.toast = None;
+            }
+        }
+
         let pr_poll_interval = self.config.timing.pr_poll_interval;
 
         // Poll for completed PR list loading
@@ -314,10 +378,12 @@ impl App {
                     self.on_focus_change();
                 }
                 FocusedWindow::PrList => {
-                    // Checkout the selected PR
+                    // Show confirmation before checking out PR
                     if let Some(pr) = self.pr_list_panel_state.selected() {
-                        let _ = self.github.checkout_pr(pr.number);
-                        self.refresh()?;
+                        self.input_modal_state.show(ReviewAction::CheckoutPr {
+                            pr_number: pr.number,
+                            branch: pr.branch.clone(),
+                        });
                     }
                 }
                 FocusedWindow::Preview => {}
@@ -427,8 +493,13 @@ impl App {
             }
 
             Action::CheckoutPr(pr_number) => {
-                let _ = self.github.checkout_pr(pr_number);
-                self.refresh()?;
+                // Show confirmation dialog (action comes from widget's Enter handling)
+                if let Some(pr) = self.pr_list_panel_state.prs.iter().find(|p| p.number == pr_number) {
+                    self.input_modal_state.show(ReviewAction::CheckoutPr {
+                        pr_number,
+                        branch: pr.branch.clone(),
+                    });
+                }
             }
 
             Action::OpenPrInBrowser(pr_number) => {
@@ -627,6 +698,21 @@ impl App {
 
         let body = self.input_modal_state.take_input();
 
+        // Handle checkout separately (needs refresh after)
+        if let ReviewAction::CheckoutPr { pr_number, .. } = &action {
+            self.input_modal_state.hide();
+            match self.github.checkout_pr(*pr_number) {
+                Ok(()) => {
+                    self.toast = Some(Toast::success("Switched to PR branch"));
+                    self.refresh()?;
+                }
+                Err(e) => {
+                    self.toast = Some(Toast::error(format!("Checkout failed: {}", e)));
+                }
+            }
+            return Ok(());
+        }
+
         let result = match &action {
             ReviewAction::Approve { pr_number } => {
                 self.github.approve_pr(*pr_number)
@@ -640,11 +726,23 @@ impl App {
             ReviewAction::LineComment { pr_number, path, line } => {
                 self.github.add_line_comment(*pr_number, path, *line, &body)
             }
+            ReviewAction::CheckoutPr { .. } => unreachable!(), // Handled above
         };
 
         match result {
             Ok(()) => {
                 self.input_modal_state.hide();
+
+                // Show success toast
+                let success_msg = match &action {
+                    ReviewAction::Approve { .. } => "PR approved",
+                    ReviewAction::RequestChanges { .. } => "Changes requested",
+                    ReviewAction::Comment { .. } => "Comment posted",
+                    ReviewAction::LineComment { .. } => "Line comment added",
+                    ReviewAction::CheckoutPr { .. } => unreachable!(),
+                };
+                self.toast = Some(Toast::success(success_msg));
+
                 // Refresh PR details to show the new comment/review
                 if let Some(pr_num) = self.pr_list_panel_state.selected_number() {
                     // Force reload by clearing the current PR
@@ -679,7 +777,8 @@ impl App {
 
         // Render PR list panel
         let pr_list_panel = PrListPanel::new(colors)
-            .focused(self.focused == FocusedWindow::PrList);
+            .focused(self.focused == FocusedWindow::PrList)
+            .spinner_frame(self.tick_count / 2); // Slow down spinner
         frame.render_stateful_widget(pr_list_panel, areas.pr_info, &mut self.pr_list_panel_state);
 
         // Render preview: PR details view or diff view depending on context
@@ -706,10 +805,43 @@ impl App {
 
         // Render input modal if open
         if self.input_modal_state.visible {
-            let modal_area = centered_rect(60, 40, area);
+            // Use smaller modal for confirmations, larger for text input
+            let height = if self.input_modal_state.action.as_ref().map(|a| a.needs_body()).unwrap_or(false) {
+                40 // Text input needs more space
+            } else {
+                15 // Confirmation dialogs are compact
+            };
+            let modal_area = centered_rect(50, height, area);
             let input_modal = InputModal::new(colors, &self.input_modal_state);
             frame.render_widget(input_modal, modal_area);
         }
+
+        // Render toast notification
+        if let Some(ref toast) = self.toast {
+            self.render_toast(frame, area, toast);
+        }
+    }
+
+    fn render_toast(&self, frame: &mut Frame, area: Rect, toast: &Toast) {
+        use ratatui::style::Color;
+
+        let msg_len = toast.message.chars().count() as u16 + 4; // padding
+        let toast_width = msg_len.min(area.width.saturating_sub(4));
+        let toast_x = area.width.saturating_sub(toast_width + 2);
+        let toast_y = area.height.saturating_sub(3);
+
+        let toast_area = Rect::new(toast_x, toast_y, toast_width, 1);
+
+        let (bg, fg) = if toast.is_error {
+            (Color::Rgb(180, 60, 60), Color::White)
+        } else {
+            (Color::Rgb(60, 140, 80), Color::White)
+        };
+
+        let style = ratatui::style::Style::default().bg(bg).fg(fg);
+        let text = format!(" {} ", toast.message);
+        let line = Line::from(Span::styled(text, style));
+        frame.render_widget(line, toast_area);
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
@@ -785,6 +917,9 @@ impl App {
             format!(" {}", self.branch)
         };
 
+        // Center: contextual hint
+        let hint = self.contextual_hint();
+
         // Right: position info
         let right_content = match self.timeline_position {
             TimelinePosition::FullDiff => "all changes (base → head) ".to_string(),
@@ -805,15 +940,35 @@ impl App {
         };
 
         let left_width = left_content.chars().count();
+        let hint_width = hint.chars().count();
         let right_width = right_content.chars().count();
-        let padding = total_width.saturating_sub(left_width + right_width);
+
+        // Calculate padding to center the hint
+        let total_used = left_width + hint_width + right_width;
+        let remaining = total_width.saturating_sub(total_used);
+        let left_pad = remaining / 2;
+        let right_pad = remaining.saturating_sub(left_pad);
+
+        let hint_style = ratatui::style::Style::default()
+            .fg(ratatui::style::Color::Rgb(120, 120, 120));
 
         let line = Line::from(vec![
             Span::styled(left_content, colors.style_status_bar()),
-            Span::styled(" ".repeat(padding), colors.style_status_bar()),
+            Span::styled(" ".repeat(left_pad), colors.style_status_bar()),
+            Span::styled(hint, hint_style),
+            Span::styled(" ".repeat(right_pad), colors.style_status_bar()),
             Span::styled(right_content, colors.style_status_bar()),
         ]);
         frame.render_widget(line, area);
+    }
+
+    /// Get contextual hint based on current focus
+    fn contextual_hint(&self) -> String {
+        match self.focused {
+            FocusedWindow::FileList => "j/k:nav  Enter:preview  ,:older  .:newer  ?:help".to_string(),
+            FocusedWindow::Preview => "j/k:scroll  c:comment  s:split/unified  Esc:back".to_string(),
+            FocusedWindow::PrList => "j/k:nav  Enter:checkout  o:browser  a:approve  ?:help".to_string(),
+        }
     }
 
     /// Generate file list title

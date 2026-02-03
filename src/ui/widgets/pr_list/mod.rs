@@ -141,6 +141,7 @@ impl PrListPanelState {
 pub struct PrListPanel<'a> {
     colors: &'a Colors,
     focused: bool,
+    spinner_frame: usize,
 }
 
 impl<'a> PrListPanel<'a> {
@@ -148,11 +149,17 @@ impl<'a> PrListPanel<'a> {
         Self {
             colors,
             focused: false,
+            spinner_frame: 0,
         }
     }
 
     pub fn focused(mut self, focused: bool) -> Self {
         self.focused = focused;
+        self
+    }
+
+    pub fn spinner_frame(mut self, frame: usize) -> Self {
+        self.spinner_frame = frame;
         self
     }
 }
@@ -167,10 +174,13 @@ impl<'a> StatefulWidget for PrListPanel<'a> {
             self.colors.style_border()
         };
 
+        const SPINNER: [char; 4] = ['◐', '◓', '◑', '◒'];
+        let spinner = SPINNER[self.spinner_frame % SPINNER.len()];
+
         let title = if state.loading && state.prs.is_empty() {
-            "PRs (loading...)".to_string()
+            format!("PRs {}", spinner)
         } else if state.loading {
-            format!("PRs ({}) ↻", state.prs.len())
+            format!("PRs ({}) {}", state.prs.len(), spinner)
         } else {
             format!("PRs ({})", state.prs.len())
         };
@@ -183,14 +193,7 @@ impl<'a> StatefulWidget for PrListPanel<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        // Only show "Loading..." if we have no PRs yet
-        if state.loading && state.prs.is_empty() {
-            let line = Line::from(Span::styled("Loading...", self.colors.style_muted()));
-            buf.set_line(inner.x, inner.y, &line, inner.width);
-            return;
-        }
-
-        if state.prs.is_empty() {
+        if state.prs.is_empty() && !state.loading {
             let line = Line::from(Span::styled("No open PRs", self.colors.style_muted()));
             buf.set_line(inner.x, inner.y, &line, inner.width);
             return;
