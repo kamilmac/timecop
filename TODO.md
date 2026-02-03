@@ -10,6 +10,16 @@ Remaining refactors and improvements.
 
 - [ ] Create `WidgetState` trait in `src/ui/widgets/mod.rs` (optional - for uniformity)
 
+### Extract PrDetailsView from DiffView
+
+Separating concerns makes DiffView more focused and scalable:
+
+- [ ] Create `pr_details/` widget for PR info, reviews, general comments
+- [ ] Remove `PreviewContent::PrDetails` variant from DiffView
+- [ ] Move `parse_pr_details()` to pr_details widget
+- [ ] Update App to render PrDetailsView when PR list is focused
+- [ ] DiffView becomes diff-only (FileDiff, FolderDiff, Loading, Empty)
+
 ---
 
 ## Event-Driven Architecture
@@ -53,6 +63,20 @@ All state changes flow through events. No polling, no special cases. Timers and 
 - [ ] Auto-switch to single view when width < threshold (e.g., 120 chars)
 - [ ] Auto-switch to split view when width >= threshold
 - [ ] Manual toggle should override auto behavior until resize
+
+### Ensure Consistency Across Modes
+
+**Line comments must work in both modes:**
+- [ ] Rendering inline comments in split view (current)
+- [ ] Rendering inline comments in single/unified view
+- [ ] Adding comments on correct line in both modes
+- [ ] Comment positioning: left side (old) vs right side (new)
+
+**Editor integration must work in both modes:**
+- [ ] `get_current_line_number()` returns correct line for both modes
+- [ ] In split: use right-side (new file) line number
+- [ ] In single: map unified diff position to actual file line
+- [ ] "o" key opens editor at correct line regardless of mode
 
 ---
 
