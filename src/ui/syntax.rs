@@ -10,6 +10,7 @@ pub struct Highlighter {
     syntax_set: SyntaxSet,
     theme_set: ThemeSet,
     theme_name: String,
+    theme_mode: ThemeMode,
 }
 
 impl Highlighter {
@@ -18,14 +19,13 @@ impl Highlighter {
     }
 
     pub fn for_theme(mode: ThemeMode) -> Self {
-        let theme_name = match mode {
-            ThemeMode::Dark => "base16-eighties.dark",
-            ThemeMode::Light => "InspiredGitHub",
-        };
+        // Use dark theme for both - we'll adjust colors manually for light mode
+        let theme_name = "base16-eighties.dark";
         Self {
             syntax_set: SyntaxSet::load_defaults_newlines(),
             theme_set: ThemeSet::load_defaults(),
             theme_name: theme_name.to_string(),
+            theme_mode: mode,
         }
     }
 
@@ -65,6 +65,7 @@ impl Highlighter {
 
         let mut highlighter = HighlightLines::new(syntax, theme);
         let mut result = Vec::new();
+        let is_light = self.theme_mode == ThemeMode::Light;
 
         for line in content.lines() {
             let ranges = highlighter.highlight_line(line, &self.syntax_set)
@@ -73,7 +74,7 @@ impl Highlighter {
             let styled_spans: Vec<(String, Style)> = ranges
                 .into_iter()
                 .map(|(style, text)| {
-                    let ratatui_style = syntect_to_ratatui_style(&style);
+                    let ratatui_style = syntect_to_ratatui_style(&style, is_light);
                     (text.to_string(), ratatui_style)
                 })
                 .collect();
@@ -92,8 +93,13 @@ impl Default for Highlighter {
 }
 
 /// Convert syntect style to ratatui style (foreground only, no background)
-fn syntect_to_ratatui_style(style: &syntect::highlighting::Style) -> Style {
-    let fg = syntect_to_ratatui_color(style.foreground);
+fn syntect_to_ratatui_style(style: &syntect::highlighting::Style, is_light: bool) -> Style {
+    let fg = if is_light {
+        // For light mode: darken all colors significantly for readability
+        darken_for_light_mode(style.foreground)
+    } else {
+        syntect_to_ratatui_color(style.foreground)
+    };
 
     // Use reset() to ensure no background color bleeds through
     let mut ratatui_style = Style::reset().fg(fg);
@@ -114,4 +120,31 @@ fn syntect_to_ratatui_style(style: &syntect::highlighting::Style) -> Style {
 /// Convert syntect color to ratatui color
 fn syntect_to_ratatui_color(color: syntect::highlighting::Color) -> Color {
     Color::Rgb(color.r, color.g, color.b)
+}
+
+/// Darken colors for light mode - convert bright colors to dark equivalents
+fn darken_for_light_mode(color: syntect::highlighting::Color) -> Color {
+    // Convert to HSL-like adjustment: reduce lightness significantly
+    let r = color.r as f32 / 255.0;
+    let g = color.g as f32 / 255.0;
+    let b = color.b as f32 / 255.0;
+
+    // Calculate luminance
+    let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+    // If the color is bright (designed for dark bg), darken it substantially
+    let (new_r, new_g, new_b) = if lum > 0.5 {
+        // Darken bright colors - multiply by factor to reduce brightness
+        let factor = 0.35; // Make quite dark
+        (
+            (r * factor * 255.0) as u8,
+            (g * factor * 255.0) as u8,
+            (b * factor * 255.0) as u8,
+        )
+    } else {
+        // Already dark, keep as is or slightly adjust
+        (color.r, color.g, color.b)
+    };
+
+    Color::Rgb(new_r, new_g, new_b)
 }
