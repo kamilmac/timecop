@@ -132,6 +132,7 @@ impl ThemeMode {
     }
 
     /// Query terminal background color using OSC 11 escape sequence
+    #[cfg(unix)]
     fn query_terminal_background() -> Option<Self> {
         let stdin = std::io::stdin();
         if !stdin.is_terminal() {
@@ -160,7 +161,14 @@ impl ThemeMode {
         Self::parse_osc11_response(&response)
     }
 
-    /// Read OSC response from terminal with timeout
+    /// Windows: OSC 11 query not supported, skip this detection method
+    #[cfg(not(unix))]
+    fn query_terminal_background() -> Option<Self> {
+        None
+    }
+
+    /// Read OSC response from terminal with timeout (Unix only)
+    #[cfg(unix)]
     fn read_osc_response(stdin: &std::io::Stdin, timeout: Duration) -> String {
         use std::os::fd::{AsRawFd, BorrowedFd};
 
