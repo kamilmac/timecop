@@ -68,6 +68,12 @@ main() {
     echo "Downloading from $DOWNLOAD_URL"
     curl -sL "$DOWNLOAD_URL" | tar -xz -C "$TMP_DIR"
 
+    # Ensure install directory exists
+    if [ ! -d "$INSTALL_DIR" ]; then
+        echo "Creating $INSTALL_DIR (requires sudo)"
+        sudo mkdir -p "$INSTALL_DIR"
+    fi
+
     # Install binary
     if [ -w "$INSTALL_DIR" ]; then
         mv "$TMP_DIR/timecop" "$INSTALL_DIR/timecop"
