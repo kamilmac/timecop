@@ -52,6 +52,16 @@ Options to consider:
 - [ ] Or: dedicated key to jump to Preview (e.g., `l` or `→`)
 - [ ] Or: keep current but make it more discoverable
 
+### Context-Dependent Preview Behavior
+
+Preview shows different content based on left pane:
+- **From FileList** → DiffView (file diff)
+  - Scroll, line comments, "s" mode toggle, "o" open editor
+- **From PrList** → PrDetailsView (PR info)
+  - Scroll only, no line-specific actions
+
+This supports extracting PrDetailsView - each widget has appropriate keybindings when focused.
+
 ---
 
 ## Cleanup
