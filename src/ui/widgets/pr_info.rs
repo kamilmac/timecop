@@ -1,3 +1,4 @@
+use crossterm::event::KeyEvent;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -7,7 +8,10 @@ use ratatui::{
 };
 
 use crate::config::Colors;
+use crate::event::KeyInput;
 use crate::github::PrSummary;
+
+use super::{Action, ReviewActionType};
 
 /// PR list panel widget state
 #[derive(Debug, Default)]
@@ -72,6 +76,69 @@ impl PrListPanelState {
         } else if self.cursor >= self.offset + visible_count {
             self.offset = self.cursor.saturating_sub(visible_count) + 1;
         }
+    }
+
+    /// Handle key input, return action for App to dispatch
+    pub fn handle_key(&mut self, key: &KeyEvent) -> Action {
+        // Review actions
+        if KeyInput::is_approve(key) {
+            if let Some(pr) = self.selected() {
+                return Action::OpenReviewModal(ReviewActionType::Approve {
+                    pr_number: pr.number,
+                });
+            }
+            return Action::None;
+        }
+
+        if KeyInput::is_request_changes(key) {
+            if let Some(pr) = self.selected() {
+                return Action::OpenReviewModal(ReviewActionType::RequestChanges {
+                    pr_number: pr.number,
+                });
+            }
+            return Action::None;
+        }
+
+        if KeyInput::is_comment(key) {
+            if let Some(pr) = self.selected() {
+                return Action::OpenReviewModal(ReviewActionType::Comment {
+                    pr_number: pr.number,
+                });
+            }
+            return Action::None;
+        }
+
+        if KeyInput::is_down(key) {
+            self.move_down();
+            if let Some(pr) = self.selected() {
+                return Action::PrSelected(pr.number);
+            }
+            return Action::None;
+        }
+
+        if KeyInput::is_up(key) {
+            self.move_up();
+            if let Some(pr) = self.selected() {
+                return Action::PrSelected(pr.number);
+            }
+            return Action::None;
+        }
+
+        if KeyInput::is_enter(key) {
+            if let Some(pr) = self.selected() {
+                return Action::CheckoutPr(pr.number);
+            }
+            return Action::None;
+        }
+
+        if KeyInput::is_open(key) {
+            if let Some(pr) = self.selected() {
+                return Action::OpenPrInBrowser(pr.number);
+            }
+            return Action::None;
+        }
+
+        Action::Ignored
     }
 }
 

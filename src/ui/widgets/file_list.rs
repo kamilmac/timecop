@@ -1,3 +1,4 @@
+use crossterm::event::KeyEvent;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -6,9 +7,13 @@ use ratatui::{
     widgets::{Block, Borders, StatefulWidget, Widget},
 };
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use crate::config::Colors;
+use crate::event::KeyInput;
 use crate::git::{FileStatus, StatusEntry};
+
+use super::Action;
 
 /// Tree node for file display
 #[derive(Debug, Clone)]
@@ -113,6 +118,53 @@ impl FileListState {
             self.offset = self.cursor;
         } else if self.cursor >= self.offset + visible_height {
             self.offset = self.cursor.saturating_sub(visible_height) + 1;
+        }
+    }
+
+    /// Handle key input, return action for App to dispatch
+    pub fn handle_key(&mut self, key: &KeyEvent) -> Action {
+        if KeyInput::is_down(key) {
+            self.move_down();
+            Action::None
+        } else if KeyInput::is_up(key) {
+            self.move_up();
+            Action::None
+        } else if KeyInput::is_fast_down(key) {
+            self.move_down_n(5);
+            Action::None
+        } else if KeyInput::is_fast_up(key) {
+            self.move_up_n(5);
+            Action::None
+        } else if KeyInput::is_top(key) {
+            self.go_top();
+            Action::None
+        } else if KeyInput::is_bottom(key) {
+            self.go_bottom();
+            Action::None
+        } else if KeyInput::is_left(key) {
+            self.collapse();
+            Action::None
+        } else if KeyInput::is_right(key) {
+            self.expand();
+            Action::None
+        } else if KeyInput::is_enter(key) {
+            // Enter on file -> select it, enter on dir -> expand/collapse
+            if let Some(entry) = self.selected() {
+                if entry.is_dir {
+                    if self.collapsed.contains(&entry.path) {
+                        self.expand();
+                    } else {
+                        self.collapse();
+                    }
+                    Action::None
+                } else {
+                    Action::FileSelected(PathBuf::from(&entry.path))
+                }
+            } else {
+                Action::None
+            }
+        } else {
+            Action::Ignored
         }
     }
 }

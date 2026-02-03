@@ -1,3 +1,4 @@
+use crossterm::event::KeyEvent;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -7,6 +8,7 @@ use ratatui::{
 };
 
 use crate::config::Colors;
+use crate::event::KeyInput;
 use crate::github::PrInfo;
 use crate::ui::Highlighter;
 
@@ -14,6 +16,7 @@ use super::diff_parser::{
     extract_diff_sides, is_binary, parse_diff,
     parse_hunk_header, parse_pr_details, truncate_or_pad, wrap_text, DiffLine, LineType,
 };
+use super::{Action, ReviewActionType};
 
 /// What to show in the diff view
 #[derive(Debug, Clone)]
@@ -351,6 +354,54 @@ impl DiffViewState {
         }
         let percent = (self.offset * 100) / self.lines.len().saturating_sub(height.saturating_sub(2)).max(1);
         format!("{}%", percent.min(100))
+    }
+
+    /// Handle key input, return action for App to dispatch
+    /// pr_number is needed for line comments
+    pub fn handle_key(&mut self, key: &KeyEvent, pr_number: Option<u64>) -> Action {
+        // Line comment
+        if KeyInput::is_comment(key) {
+            if let (Some(pr_num), Some(path), Some(line)) = (
+                pr_number,
+                self.get_current_file().map(|s| s.to_string()),
+                self.get_current_line_number(),
+            ) {
+                return Action::OpenReviewModal(ReviewActionType::LineComment {
+                    pr_number: pr_num,
+                    path,
+                    line: line as u32,
+                });
+            }
+            return Action::None;
+        }
+
+        if KeyInput::is_down(key) {
+            self.move_down();
+            Action::None
+        } else if KeyInput::is_up(key) {
+            self.move_up();
+            Action::None
+        } else if KeyInput::is_fast_down(key) {
+            self.move_down_n(5);
+            Action::None
+        } else if KeyInput::is_fast_up(key) {
+            self.move_up_n(5);
+            Action::None
+        } else if KeyInput::is_page_down(key) {
+            self.page_down(20);
+            Action::None
+        } else if KeyInput::is_page_up(key) {
+            self.page_up(20);
+            Action::None
+        } else if KeyInput::is_top(key) {
+            self.go_top();
+            Action::None
+        } else if KeyInput::is_bottom(key) {
+            self.go_bottom();
+            Action::None
+        } else {
+            Action::Ignored
+        }
     }
 }
 
