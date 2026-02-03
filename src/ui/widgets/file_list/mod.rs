@@ -434,7 +434,7 @@ fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'sta
     } else if entry.is_dir {
         colors.style_muted()
     } else {
-        Style::default().fg(colors.text)
+        Style::reset().fg(colors.text)
     };
     spans.push(Span::styled(entry.display.clone(), name_style));
 
@@ -444,7 +444,7 @@ fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'sta
             FileStatus::Modified => colors.style_modified(),
             FileStatus::Added => colors.style_added(),
             FileStatus::Deleted => colors.style_removed(),
-            FileStatus::Renamed => Style::default().fg(colors.renamed),
+            FileStatus::Renamed => Style::reset().fg(colors.renamed),
             FileStatus::Unchanged => colors.style_muted(),
         };
         spans.push(Span::raw(" ".to_string()));

@@ -232,7 +232,7 @@ impl<'a> Widget for InputModal<'a> {
             for line in &input_lines {
                 lines.push(Line::from(Span::styled(
                     line.to_string(),
-                    ratatui::style::Style::default().fg(self.colors.text),
+                    ratatui::style::Style::reset().fg(self.colors.text),
                 )));
             }
 
@@ -240,7 +240,7 @@ impl<'a> Widget for InputModal<'a> {
             if input_lines.is_empty() || self.state.input.is_empty() {
                 lines.push(Line::from(Span::styled(
                     "█",
-                    ratatui::style::Style::default().fg(self.colors.text),
+                    ratatui::style::Style::reset().fg(self.colors.text),
                 )));
             }
 
@@ -261,7 +261,7 @@ impl<'a> Widget for InputModal<'a> {
                 Line::from(""),
                 Line::from(Span::styled(
                     "Are you sure you want to approve this PR?",
-                    ratatui::style::Style::default().fg(self.colors.text),
+                    ratatui::style::Style::reset().fg(self.colors.text),
                 )),
                 Line::from(""),
                 Line::from(vec![

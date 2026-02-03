@@ -255,7 +255,7 @@ fn render_line(line: &DisplayLine, cursor: bool, colors: &Colors) -> Line<'stati
     let (style, prefix) = match line.line_type {
         LineType::Header => (colors.style_header(), ""),
         LineType::Info => (colors.style_muted(), ""),
-        LineType::Context => (Style::default().fg(colors.text), ""),
+        LineType::Context => (Style::reset().fg(colors.text), ""),
         LineType::Added => (colors.style_added(), ""),
         LineType::Removed => (colors.style_removed(), ""),
         LineType::Comment => {

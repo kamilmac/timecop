@@ -555,7 +555,7 @@ fn render_header_line(diff_line: &DiffLine, cursor: bool, colors: &Colors) -> Li
                 .bg(colors.comment_bg);
             (style, "\u{2502} ")
         }
-        _ => (Style::default().fg(colors.text), ""),
+        _ => (Style::reset().fg(colors.text), ""),
     };
 
     let content_style = if cursor {
@@ -601,7 +601,7 @@ fn render_highlighted_diff_line(
     } else {
         let text = diff_line.left_text.as_deref().unwrap_or("");
         let text = truncate_or_pad(&text.replace('\t', "    "), content_width);
-        let mut style = Style::default().fg(colors.text);
+        let mut style = Style::reset().fg(colors.text);
         if let Some(bg) = left_bg {
             style = style.bg(bg);
         }
@@ -629,7 +629,7 @@ fn render_highlighted_diff_line(
     } else {
         let text = diff_line.right_text.as_deref().unwrap_or("");
         let text = truncate_or_pad(&text.replace('\t', "    "), content_width);
-        let mut style = Style::default().fg(colors.text);
+        let mut style = Style::reset().fg(colors.text);
         if let Some(bg) = right_bg {
             style = style.bg(bg);
         }
@@ -705,8 +705,8 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
         let style = match diff_line.line_type {
             LineType::Header => colors.style_header(),
             LineType::Info => colors.style_muted(),
-            LineType::Comment => ratatui::style::Style::default().fg(colors.comment),
-            _ => ratatui::style::Style::default().fg(colors.text),
+            LineType::Comment => ratatui::style::Style::reset().fg(colors.comment),
+            _ => ratatui::style::Style::reset().fg(colors.text),
         };
         let content_style = if cursor {
             style.add_modifier(ratatui::style::Modifier::REVERSED)
@@ -730,7 +730,7 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
         let left_text = diff_line.left_text.as_deref().unwrap_or("");
         let left_text = left_text.replace('\t', "    ");
 
-        let style = ratatui::style::Style::default().fg(colors.text);
+        let style = ratatui::style::Style::reset().fg(colors.text);
         let content_style = if cursor {
             style.add_modifier(ratatui::style::Modifier::REVERSED)
         } else {
@@ -754,8 +754,8 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
 
     let left_style = match diff_line.line_type {
         LineType::Removed => colors.style_removed(),
-        LineType::Context => ratatui::style::Style::default().fg(colors.text),
-        _ => ratatui::style::Style::default().fg(colors.text),
+        LineType::Context => ratatui::style::Style::reset().fg(colors.text),
+        _ => ratatui::style::Style::reset().fg(colors.text),
     };
 
     let content_width = pane_width.saturating_sub(num_width + 1); // -1 for " "
@@ -771,8 +771,8 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
 
     let right_style = match diff_line.line_type {
         LineType::Added => colors.style_added(),
-        LineType::Context => ratatui::style::Style::default().fg(colors.text),
-        _ => ratatui::style::Style::default().fg(colors.text),
+        LineType::Context => ratatui::style::Style::reset().fg(colors.text),
+        _ => ratatui::style::Style::reset().fg(colors.text),
     };
 
     let right_content = truncate_or_pad(&right_text, content_width);
@@ -834,12 +834,12 @@ fn render_unified_diff_line(
             let text = diff_line.right_text.as_deref()
                 .or(diff_line.left_text.as_deref())
                 .unwrap_or("");
-            (" ", num, text, Style::default().fg(colors.text), None)
+            (" ", num, text, Style::reset().fg(colors.text), None)
         }
         _ => {
             let num = " ".repeat(num_width);
             let text = diff_line.left_text.as_deref().unwrap_or("");
-            (" ", num, text, Style::default().fg(colors.text), None)
+            (" ", num, text, Style::reset().fg(colors.text), None)
         }
     };
 

@@ -113,6 +113,6 @@ fn format_binding<'a>(key: &'a str, desc: &'a str, colors: &'a Colors) -> Line<'
     Line::from(vec![
         Span::styled(format!("{:>12}", key), colors.style_header()),
         Span::raw("  "),
-        Span::styled(desc, ratatui::style::Style::default().fg(colors.text)),
+        Span::styled(desc, ratatui::style::Style::reset().fg(colors.text)),
     ])
 }
