@@ -46,7 +46,7 @@ pub struct DiffStats {
 }
 
 /// Timeline position for viewing PR history
-/// Order: Wip → FullDiff → -1 → -2 → ... → -7
+/// Order: Wip → FullDiff → -1 → -2 → ... → -9
 /// FullDiff is the default (primary code review view)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimelinePosition {
@@ -71,7 +71,7 @@ impl TimelinePosition {
                     Self::FullDiff
                 }
             }
-            Self::CommitDiff(n) if n < max_commits && n < 7 => Self::CommitDiff(n + 1),
+            Self::CommitDiff(n) if n < max_commits && n < 9 => Self::CommitDiff(n + 1),
             other => other,
         }
     }

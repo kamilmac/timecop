@@ -277,6 +277,12 @@ impl App {
             return Ok(());
         }
 
+        // Toggle diff view mode (global - works from any pane)
+        if KeyInput::is_toggle_view_mode(&key) {
+            self.diff_view_state.toggle_view_mode();
+            return Ok(());
+        }
+
         // Tab cycles through all panes
         if KeyInput::is_tab(&key) {
             self.focused = self.focused.next();
@@ -673,6 +679,8 @@ impl App {
             let pr_details_view = PrDetailsView::new(colors).focused(preview_focused);
             frame.render_stateful_widget(pr_details_view, areas.preview, &mut self.pr_details_view_state);
         } else {
+            // Auto-adjust diff view mode based on preview width
+            self.diff_view_state.auto_adjust_view_mode(areas.preview.width);
             let diff_view = DiffView::new(colors).focused(preview_focused);
             frame.render_stateful_widget(diff_view, areas.preview, &mut self.diff_view_state);
         }
@@ -710,12 +718,12 @@ impl App {
             .add_modifier(Modifier::BOLD);
 
         // TIMECOP as timeline indicator
-        // Elements: ◆─T─I─M─E─C─O─P─◆ (9 positions)
-        // Position mapping (right to left): 0=◆, 1=P, 2=O, 3=C, 4=E, 5=M, 6=I, 7=T, 8=◆
-        let elements = ["◆", "─", "T", "─", "I", "─", "M", "─", "E", "─", "C", "─", "O", "─", "P", "─", "◆"];
-        let position_to_index = [16, 14, 12, 10, 8, 6, 4, 2, 0]; // maps timeline position to element index
+        // Elements: ◆─◆─T─I─M─E─C─O─P─◆─◆ (11 positions)
+        // Position mapping (right to left): 0=wip, 1=full, 2=-1, 3=-2, ..., 10=-9
+        let elements = ["◆", "─", "◆", "─", "T", "─", "I", "─", "M", "─", "E", "─", "C", "─", "O", "─", "P", "─", "◆", "─", "◆"];
+        let position_to_index = [20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 0]; // maps timeline position to element index
 
-        let selected_idx = self.timeline_position.display_index().min(8);
+        let selected_idx = self.timeline_position.display_index().min(10);
         let highlight_center = position_to_index[selected_idx];
 
         let mut spans = Vec::new();
@@ -726,13 +734,31 @@ impl App {
             spans.push(Span::styled(*elem, style));
         }
 
-        // Center the logo
+        // State label (dimmed, lowercase, fixed width)
+        let state_label = match self.timeline_position {
+            TimelinePosition::Wip => "wip",
+            TimelinePosition::FullDiff => "all changes",
+            TimelinePosition::CommitDiff(n) => match n {
+                1 => "-1", 2 => "-2", 3 => "-3", 4 => "-4", 5 => "-5",
+                6 => "-6", 7 => "-7", 8 => "-8", _ => "-9",
+            },
+        };
+        let dim_style = ratatui::style::Style::default()
+            .fg(Color::Rgb(100, 100, 100));
+
+        // Fixed width for label (longest is "all changes" = 11 chars)
+        const LABEL_WIDTH: usize = 11;
+        let padded_label = format!("  {:width$}", state_label, width = LABEL_WIDTH);
+        let label_total = 2 + LABEL_WIDTH; // "  " + label
+
+        // Center the timeline itself, label goes to its right
         let logo_width = elements.iter().map(|s| s.chars().count()).sum::<usize>();
         let left_pad = total_width.saturating_sub(logo_width) / 2;
-        let right_pad = total_width.saturating_sub(logo_width + left_pad);
+        let right_pad = total_width.saturating_sub(logo_width + left_pad + label_total);
 
         let mut line_spans = vec![Span::raw(" ".repeat(left_pad))];
         line_spans.extend(spans);
+        line_spans.push(Span::styled(padded_label, dim_style));
         line_spans.push(Span::raw(" ".repeat(right_pad)));
 
         frame.render_widget(Line::from(line_spans), area);

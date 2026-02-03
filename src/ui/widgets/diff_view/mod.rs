@@ -48,6 +48,11 @@ impl Default for PreviewContent {
     }
 }
 
+/// Minimum width for split view (below this, auto-switch to unified)
+const SPLIT_VIEW_MIN_WIDTH: u16 = 100;
+/// Minimum width change to reset manual mode override
+const RESIZE_THRESHOLD: u16 = 4;
+
 /// Diff view widget state
 pub struct DiffViewState {
     pub content: PreviewContent,
@@ -56,6 +61,10 @@ pub struct DiffViewState {
     pub offset: usize,
     pub pr: Option<PrInfo>,
     pub view_mode: DiffViewMode,
+    /// User manually set the view mode (don't auto-switch)
+    manual_mode: bool,
+    /// Last width seen (for detecting significant resize)
+    last_width: u16,
     current_file: String,
     /// Syntax-highlighted lines for diff mode (left side, indexed by line number)
     highlighted_left: std::collections::HashMap<usize, Vec<(String, Style)>>,
@@ -72,6 +81,8 @@ impl Default for DiffViewState {
             offset: 0,
             pr: None,
             view_mode: DiffViewMode::default(),
+            manual_mode: false,
+            last_width: 0,
             current_file: String::new(),
             highlighted_left: std::collections::HashMap::new(),
             highlighted_right: std::collections::HashMap::new(),
@@ -345,23 +356,39 @@ impl DiffViewState {
         format!("{}%", percent.min(100))
     }
 
-    /// Toggle between split and unified view modes
+    /// Toggle between split and unified view modes (manual override)
     pub fn toggle_view_mode(&mut self) {
         self.view_mode = match self.view_mode {
             DiffViewMode::Split => DiffViewMode::Unified,
             DiffViewMode::Unified => DiffViewMode::Split,
+        };
+        self.manual_mode = true;
+    }
+
+    /// Auto-adjust view mode based on available width (unless user manually set it)
+    pub fn auto_adjust_view_mode(&mut self, width: u16) {
+        // Reset manual mode on significant resize
+        if self.manual_mode && self.last_width > 0 {
+            let diff = (width as i32 - self.last_width as i32).unsigned_abs() as u16;
+            if diff >= RESIZE_THRESHOLD {
+                self.manual_mode = false;
+            }
+        }
+        self.last_width = width;
+
+        if self.manual_mode {
+            return;
+        }
+        self.view_mode = if width < SPLIT_VIEW_MIN_WIDTH {
+            DiffViewMode::Unified
+        } else {
+            DiffViewMode::Split
         };
     }
 
     /// Handle key input, return action for App to dispatch
     /// pr_number is needed for line comments
     pub fn handle_key(&mut self, key: &KeyEvent, pr_number: Option<u64>) -> Action {
-        // Toggle view mode
-        if KeyInput::is_toggle_view_mode(key) {
-            self.toggle_view_mode();
-            return Action::None;
-        }
-
         // Line comment
         if KeyInput::is_comment(key) {
             if let (Some(pr_num), Some(path), Some(line)) = (
@@ -488,7 +515,13 @@ impl<'a> StatefulWidget for DiffView<'a> {
             let line = if diff_line.is_header {
                 render_header_line(diff_line, is_cursor, self.colors)
             } else if state.view_mode == DiffViewMode::Unified {
-                render_unified_diff_line(diff_line, is_cursor, self.colors)
+                let hl = match diff_line.line_type {
+                    LineType::Added => diff_line.right_num.and_then(|n| state.highlighted_right.get(&n)),
+                    LineType::Removed => diff_line.left_num.and_then(|n| state.highlighted_left.get(&n)),
+                    _ => diff_line.right_num.and_then(|n| state.highlighted_right.get(&n))
+                        .or_else(|| diff_line.left_num.and_then(|n| state.highlighted_left.get(&n))),
+                };
+                render_unified_diff_line(diff_line, hl, is_cursor, self.colors)
             } else if has_diff_highlighting {
                 let left_hl = diff_line.left_num.and_then(|n| state.highlighted_left.get(&n));
                 let right_hl = diff_line.right_num.and_then(|n| state.highlighted_right.get(&n));
@@ -769,56 +802,80 @@ fn render_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors, pane_wi
 }
 
 /// Render a diff line in unified mode (single pane, traditional +/- prefix)
-fn render_unified_diff_line(diff_line: &DiffLine, cursor: bool, colors: &Colors) -> Line<'static> {
+fn render_unified_diff_line(
+    diff_line: &DiffLine,
+    highlight: Option<&Vec<(String, Style)>>,
+    cursor: bool,
+    colors: &Colors,
+) -> Line<'static> {
     let mut spans = vec![];
     let num_width = 4;
 
     // Show appropriate line number and prefix based on line type
-    let (prefix, line_num, text, style) = match diff_line.line_type {
+    let (prefix, line_num, text, base_style, bg_color) = match diff_line.line_type {
         LineType::Added => {
             let num = diff_line.right_num
                 .map(|n| format!("{:>width$}", n, width = num_width))
                 .unwrap_or_else(|| " ".repeat(num_width));
             let text = diff_line.right_text.as_deref().unwrap_or("");
-            ("+", num, text, colors.style_added())
+            ("+", num, text, colors.style_added(), Some(colors.added_bg))
         }
         LineType::Removed => {
             let num = diff_line.left_num
                 .map(|n| format!("{:>width$}", n, width = num_width))
                 .unwrap_or_else(|| " ".repeat(num_width));
             let text = diff_line.left_text.as_deref().unwrap_or("");
-            ("-", num, text, colors.style_removed())
+            ("-", num, text, colors.style_removed(), Some(colors.removed_bg))
         }
         LineType::Context => {
-            // For context, prefer right_num (new file line number)
             let num = diff_line.right_num.or(diff_line.left_num)
                 .map(|n| format!("{:>width$}", n, width = num_width))
                 .unwrap_or_else(|| " ".repeat(num_width));
             let text = diff_line.right_text.as_deref()
                 .or(diff_line.left_text.as_deref())
                 .unwrap_or("");
-            (" ", num, text, Style::default().fg(colors.text))
+            (" ", num, text, Style::default().fg(colors.text), None)
         }
         _ => {
-            // Headers etc - shouldn't reach here but handle gracefully
             let num = " ".repeat(num_width);
             let text = diff_line.left_text.as_deref().unwrap_or("");
-            (" ", num, text, Style::default().fg(colors.text))
+            (" ", num, text, Style::default().fg(colors.text), None)
         }
-    };
-
-    let text = text.replace('\t', "    ");
-
-    let content_style = if cursor {
-        style.add_modifier(ratatui::style::Modifier::REVERSED)
-    } else {
-        style
     };
 
     spans.push(Span::styled(line_num, colors.style_muted()));
     spans.push(Span::styled(" ", colors.style_muted()));
-    spans.push(Span::styled(prefix.to_string(), content_style));
-    spans.push(Span::styled(text, content_style));
+
+    // Prefix with base style
+    let prefix_style = if cursor {
+        base_style.add_modifier(ratatui::style::Modifier::REVERSED)
+    } else {
+        base_style
+    };
+    spans.push(Span::styled(prefix.to_string(), prefix_style));
+
+    // Content with syntax highlighting if available
+    if let Some(hl) = highlight {
+        for (hl_text, hl_style) in hl {
+            let text = hl_text.replace('\t', "    ");
+            let mut style = *hl_style;
+            if let Some(bg) = bg_color {
+                style = style.bg(bg);
+            }
+            if cursor {
+                style = style.add_modifier(ratatui::style::Modifier::REVERSED);
+            }
+            spans.push(Span::styled(text, style));
+        }
+    } else {
+        let text = text.replace('\t', "    ");
+        let content_style = if cursor {
+            base_style.add_modifier(ratatui::style::Modifier::REVERSED)
+        } else {
+            base_style
+        };
+        spans.push(Span::styled(text, content_style));
+    }
 
     Line::from(spans)
 }
