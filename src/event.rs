@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use ignore::gitignore::GitignoreBuilder;
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, DebounceEventResult, DebouncedEventKind};
@@ -14,6 +14,8 @@ use std::time::Duration;
 pub enum AppEvent {
     /// Terminal key press
     Key(KeyEvent),
+    /// Mouse event
+    Mouse(MouseEvent),
     /// File system change detected
     FileChanged,
     /// Tick for periodic updates
@@ -53,10 +55,18 @@ impl EventHandler {
                     }
 
                     if let Ok(event) = event::read() {
-                        if let Event::Key(key) = event {
-                            if event_tx.send(AppEvent::Key(key)).is_err() {
-                                break;
+                        match event {
+                            Event::Key(key) => {
+                                if event_tx.send(AppEvent::Key(key)).is_err() {
+                                    break;
+                                }
                             }
+                            Event::Mouse(mouse) => {
+                                if event_tx.send(AppEvent::Mouse(mouse)).is_err() {
+                                    break;
+                                }
+                            }
+                            _ => {}
                         }
                     }
                 } else if !paused_clone.load(Ordering::Relaxed) {

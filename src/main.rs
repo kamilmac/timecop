@@ -91,6 +91,9 @@ fn run_app<B: Backend + io::Write>(
             AppEvent::Key(key) => {
                 app.handle_key(key)?;
             }
+            AppEvent::Mouse(mouse) => {
+                app.handle_mouse(mouse)?;
+            }
             AppEvent::Tick => {
                 app.handle_tick();
             }

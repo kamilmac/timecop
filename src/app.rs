@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     layout::Rect,
     text::{Line, Span},
@@ -15,8 +15,9 @@ use crate::git::{DiffStats, GitClient, TimelinePosition};
 use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
     centered_rect, Action, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
-    Highlighter, InputModal, InputModalState, InputResult, PrDetailsView, PrDetailsViewState,
-    PrListPanel, PrListPanelState, PreviewContent, ReviewAction, ReviewActionType,
+    Highlighter, InputModal, InputModalState, InputResult, LayoutAreas, PrDetailsView,
+    PrDetailsViewState, PrListPanel, PrListPanelState, PreviewContent, ReviewAction,
+    ReviewActionType,
 };
 
 /// Which window is focused
@@ -120,6 +121,9 @@ pub struct App {
 
     // Syntax highlighting
     highlighter: Highlighter,
+
+    // Layout areas for mouse hit testing
+    layout_areas: Option<LayoutAreas>,
 }
 
 impl App {
@@ -159,6 +163,7 @@ impl App {
             input_modal_state: InputModalState::new(),
             highlighter,
             config,
+            layout_areas: None,
         };
 
         // Show warning if gh CLI is not available
@@ -457,6 +462,86 @@ impl App {
         self.dispatch(action)?;
 
         Ok(())
+    }
+
+    /// Handle mouse input
+    pub fn handle_mouse(&mut self, mouse: MouseEvent) -> Result<()> {
+        if self.input_modal_state.visible || self.show_help {
+            return Ok(());
+        }
+        let Some(areas) = self.layout_areas.clone() else { return Ok(()) };
+        let (x, y) = (mouse.column, mouse.row);
+
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => self.handle_click(x, y, &areas),
+            MouseEventKind::ScrollDown => self.handle_scroll(true),
+            MouseEventKind::ScrollUp => self.handle_scroll(false),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn handle_click(&mut self, x: u16, y: u16, areas: &LayoutAreas) {
+        let target = if areas.file_list.intersects(Rect::new(x, y, 1, 1)) {
+            Some((FocusedWindow::FileList, y.saturating_sub(areas.file_list.y + 1)))
+        } else if areas.pr_info.intersects(Rect::new(x, y, 1, 1)) {
+            Some((FocusedWindow::PrList, y.saturating_sub(areas.pr_info.y + 1)))
+        } else if areas.preview.intersects(Rect::new(x, y, 1, 1)) {
+            Some((FocusedWindow::Preview, y.saturating_sub(areas.preview.y + 1)))
+        } else {
+            None
+        };
+
+        if let Some((window, row)) = target {
+            if self.focused != window {
+                self.focused = window;
+                self.on_focus_change();
+            }
+            match window {
+                FocusedWindow::FileList => {
+                    self.file_list_state.click_at(row as usize);
+                    self.update_preview();
+                }
+                FocusedWindow::PrList => {
+                    if self.pr_list_panel_state.click_at(row as usize) {
+                        if let Some(n) = self.pr_list_panel_state.selected_number() {
+                            self.load_pr_details(n);
+                            self.show_selected_pr_in_preview();
+                        }
+                    }
+                }
+                FocusedWindow::Preview => {
+                    if self.pr_details_view_state.pr.is_some() {
+                        self.pr_details_view_state.click_at(row as usize);
+                    } else {
+                        self.diff_view_state.click_at(row as usize);
+                    }
+                }
+            }
+        }
+    }
+
+    fn handle_scroll(&mut self, down: bool) {
+        match self.focused {
+            FocusedWindow::FileList => {
+                if down { self.file_list_state.move_down_n(3) } else { self.file_list_state.move_up_n(3) }
+                self.update_preview();
+            }
+            FocusedWindow::PrList => {
+                if down { self.pr_list_panel_state.move_down() } else { self.pr_list_panel_state.move_up() }
+                if let Some(n) = self.pr_list_panel_state.selected_number() {
+                    self.load_pr_details(n);
+                    self.show_selected_pr_in_preview();
+                }
+            }
+            FocusedWindow::Preview => {
+                if self.pr_details_view_state.pr.is_some() {
+                    if down { self.pr_details_view_state.move_down_n(3) } else { self.pr_details_view_state.move_up_n(3) }
+                } else {
+                    if down { self.diff_view_state.move_down_n(3) } else { self.diff_view_state.move_up_n(3) }
+                }
+            }
+        }
     }
 
     /// Dispatch an action from a widget
@@ -777,6 +862,9 @@ impl App {
         let colors = &self.config.colors;
         let layout = AppLayout::default();
         let areas = layout.compute(area, self.pr_list_panel_state.prs.len());
+
+        // Store layout areas for mouse hit testing
+        self.layout_areas = Some(areas.clone());
 
         // Render header with app name
         self.render_header(frame, areas.header);

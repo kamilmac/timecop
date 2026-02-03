@@ -62,6 +62,16 @@ impl PrListPanelState {
         self.cursor = self.cursor.saturating_sub(1);
     }
 
+    /// Click at a visible row (relative to inner area). Returns true if selection changed.
+    pub fn click_at(&mut self, visible_row: usize) -> bool {
+        let target = self.offset + visible_row;
+        if target < self.prs.len() && target != self.cursor {
+            self.cursor = target;
+            return true;
+        }
+        false
+    }
+
     pub fn selected(&self) -> Option<&PrSummary> {
         self.prs.get(self.cursor)
     }

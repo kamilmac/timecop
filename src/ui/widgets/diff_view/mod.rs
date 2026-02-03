@@ -296,6 +296,14 @@ impl DiffViewState {
         self.cursor = self.cursor.saturating_sub(n);
     }
 
+    /// Click at a visible row (relative to inner area)
+    pub fn click_at(&mut self, visible_row: usize) {
+        let target = self.offset + visible_row;
+        if target < self.lines.len() {
+            self.cursor = target;
+        }
+    }
+
     pub fn go_top(&mut self) {
         self.cursor = 0;
         self.offset = 0;

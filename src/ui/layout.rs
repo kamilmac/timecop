@@ -16,6 +16,7 @@ impl Default for AppLayout {
 }
 
 /// Computed layout areas
+#[derive(Clone)]
 pub struct LayoutAreas {
     pub header: Rect,
     pub file_list: Rect,
