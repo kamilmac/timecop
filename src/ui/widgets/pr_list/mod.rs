@@ -131,12 +131,7 @@ impl PrListPanelState {
             return Action::None;
         }
 
-        if KeyInput::is_open(key) {
-            if let Some(pr) = self.selected() {
-                return Action::OpenPrInBrowser(pr.number);
-            }
-            return Action::None;
-        }
+        // Note: 'o' (open in browser) is handled by App directly
 
         Action::Ignored
     }

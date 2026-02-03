@@ -56,6 +56,10 @@ impl FileListState {
         self.rebuild_tree();
     }
 
+    pub fn file_count(&self) -> usize {
+        self.files.len()
+    }
+
     pub fn rebuild_tree(&mut self) {
         self.entries = build_tree(&self.files, &self.collapsed, &self.has_comments);
         if self.cursor >= self.entries.len() && !self.entries.is_empty() {

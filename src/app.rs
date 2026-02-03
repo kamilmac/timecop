@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use crate::async_loader::AsyncLoader;
 use crate::config::Config;
 use crate::event::KeyInput;
-use crate::git::{DiffStats, GitClient, StatusEntry, TimelinePosition};
+use crate::git::{DiffStats, GitClient, TimelinePosition};
 use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
     centered_rect, Action, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
@@ -70,7 +70,6 @@ pub struct App {
 
     // Data
     pub branch: String,
-    pub files: Vec<StatusEntry>,
     pub diff_stats: DiffStats,
     pub selected_pr: Option<PrInfo>,
 
@@ -108,7 +107,6 @@ impl App {
             timeline_position: TimelinePosition::default(),
             commit_count: 0,
             branch,
-            files: vec![],
             diff_stats: DiffStats::default(),
             selected_pr: None,
             async_loader: AsyncLoader::new(),
@@ -139,16 +137,14 @@ impl App {
         self.commit_count = self.git.commit_count_since_base().unwrap_or(0);
 
         // Load files based on timeline position
-        self.files = self.git.status_at_position(self.timeline_position)?;
+        let files = self.git.status_at_position(self.timeline_position)?;
+        self.file_list_state.set_files(files);
 
-        // Compute full diff stats only on branch change (not on timeline change)
-        if branch_changed || self.diff_stats.added == 0 && self.diff_stats.removed == 0 {
+        // Compute full diff stats on branch change or if not yet calculated
+        if branch_changed || (self.diff_stats.added == 0 && self.diff_stats.removed == 0) {
             self.diff_stats = self.git.diff_stats_at_position(TimelinePosition::FullDiff)
                 .unwrap_or_default();
         }
-
-        // Update widget states
-        self.file_list_state.set_files(self.files.clone());
 
         // Update PR list panel with current branch
         if branch_changed {
@@ -163,6 +159,19 @@ impl App {
         self.last_pr_list_poll = Instant::now() - self.config.timing.pr_poll_interval - Duration::from_secs(1);
 
         // Update preview
+        self.update_preview();
+
+        Ok(())
+    }
+
+    /// Lightweight refresh for timeline navigation only
+    /// Skips branch check and PR list reload
+    fn refresh_timeline(&mut self) -> Result<()> {
+        // Load files based on new timeline position
+        let files = self.git.status_at_position(self.timeline_position)?;
+        self.file_list_state.set_files(files);
+
+        // Update preview with new diff
         self.update_preview();
 
         Ok(())
@@ -331,12 +340,12 @@ impl App {
         // Timeline navigation: , goes to next (older), . goes to prev (newer)
         if KeyInput::is_timeline_next(&key) {
             self.timeline_position = self.timeline_position.next(self.commit_count);
-            self.refresh()?;
+            self.refresh_timeline()?;
             return Ok(());
         }
         if KeyInput::is_timeline_prev(&key) {
             self.timeline_position = self.timeline_position.prev();
-            self.refresh()?;
+            self.refresh_timeline()?;
             return Ok(());
         }
 
@@ -809,7 +818,7 @@ impl App {
 
     /// Generate file list title
     fn file_list_title(&self) -> String {
-        format!("Files ({})", self.files.len())
+        format!("Files ({})", self.file_list_state.file_count())
     }
 
     /// Get commit message for current timeline position (for status bar)
