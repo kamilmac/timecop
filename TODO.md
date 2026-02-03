@@ -9,7 +9,6 @@ Remaining refactors and improvements.
 ### Remaining Tasks
 
 - [ ] Create `WidgetState` trait in `src/ui/widgets/mod.rs` (optional - for uniformity)
-- [ ] Extract PR details rendering to `pr_details/` widget
 
 ---
 
