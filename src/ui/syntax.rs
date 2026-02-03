@@ -91,11 +91,12 @@ impl Default for Highlighter {
     }
 }
 
-/// Convert syntect style to ratatui style
+/// Convert syntect style to ratatui style (foreground only, no background)
 fn syntect_to_ratatui_style(style: &syntect::highlighting::Style) -> Style {
     let fg = syntect_to_ratatui_color(style.foreground);
 
-    let mut ratatui_style = Style::default().fg(fg);
+    // Use reset() to ensure no background color bleeds through
+    let mut ratatui_style = Style::reset().fg(fg);
 
     if style.font_style.contains(FontStyle::BOLD) {
         ratatui_style = ratatui_style.add_modifier(Modifier::BOLD);
