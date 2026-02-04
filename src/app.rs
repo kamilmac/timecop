@@ -245,6 +245,19 @@ impl App {
         }
     }
 
+    /// Checkout a PR branch directly
+    fn checkout_pr(&mut self, pr_number: u64) {
+        match self.github.checkout_pr(pr_number) {
+            Ok(()) => {
+                self.toast = Some(Toast::success("Switched to PR branch"));
+                let _ = self.refresh();
+            }
+            Err(e) => {
+                self.toast = Some(Toast::error(format!("Checkout failed: {}", e)));
+            }
+        }
+    }
+
     /// Apply full PR details to state
     fn apply_pr_details(&mut self, pr: PrInfo) {
         // Update file comments indicator
@@ -384,12 +397,9 @@ impl App {
                     self.on_focus_change();
                 }
                 FocusedWindow::PrList => {
-                    // Show confirmation before checking out PR
+                    // Checkout PR directly (no confirmation)
                     if let Some(pr) = self.pr_list_panel_state.selected() {
-                        self.input_modal_state.show(ReviewAction::CheckoutPr {
-                            pr_number: pr.number,
-                            branch: pr.branch.clone(),
-                        });
+                        self.checkout_pr(pr.number);
                     }
                 }
                 FocusedWindow::Preview => {}
@@ -559,12 +569,7 @@ impl App {
             }
 
             Action::CheckoutPr(pr_number) => {
-                if let Some(pr) = self.pr_list_panel_state.prs.iter().find(|p| p.number == pr_number) {
-                    self.input_modal_state.show(ReviewAction::CheckoutPr {
-                        pr_number,
-                        branch: pr.branch.clone(),
-                    });
-                }
+                self.checkout_pr(pr_number);
             }
 
             Action::OpenReviewModal(review_type) => {
@@ -747,21 +752,6 @@ impl App {
 
         let body = self.input_modal_state.take_input();
 
-        // Handle checkout separately (needs refresh after)
-        if let ReviewAction::CheckoutPr { pr_number, .. } = &action {
-            self.input_modal_state.hide();
-            match self.github.checkout_pr(*pr_number) {
-                Ok(()) => {
-                    self.toast = Some(Toast::success("Switched to PR branch"));
-                    self.refresh()?;
-                }
-                Err(e) => {
-                    self.toast = Some(Toast::error(format!("Checkout failed: {}", e)));
-                }
-            }
-            return Ok(());
-        }
-
         let result = match &action {
             ReviewAction::Approve { pr_number } => {
                 self.github.approve_pr(*pr_number)
@@ -775,7 +765,6 @@ impl App {
             ReviewAction::LineComment { pr_number, path, line } => {
                 self.github.add_line_comment(*pr_number, path, *line, &body)
             }
-            ReviewAction::CheckoutPr { .. } => unreachable!(), // Handled above
         };
 
         match result {
@@ -788,7 +777,6 @@ impl App {
                     ReviewAction::RequestChanges { .. } => "Changes requested",
                     ReviewAction::Comment { .. } => "Comment posted",
                     ReviewAction::LineComment { .. } => "Line comment added",
-                    ReviewAction::CheckoutPr { .. } => unreachable!(),
                 };
                 self.toast = Some(Toast::success(success_msg));
 
