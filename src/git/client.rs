@@ -428,6 +428,12 @@ impl GitClient {
                 let diff = self.repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
                 let result = self.diff_to_string(&diff)?;
                 if result.is_empty() {
+                    // No committed changes - fall through to show uncommitted changes
+                    let wip_diff = self.repo.diff_tree_to_workdir(Some(&head_tree), Some(&mut opts))?;
+                    let wip_result = self.diff_to_string(&wip_diff)?;
+                    if !wip_result.is_empty() {
+                        return Ok(wip_result);
+                    }
                     return self.format_new_file(path);
                 }
                 Ok(result)
