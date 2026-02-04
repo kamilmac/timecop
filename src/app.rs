@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use crate::async_loader::AsyncLoader;
 use crate::config::Config;
 use crate::event::KeyInput;
-use crate::git::{DiffStats, GitClient, TimelinePosition};
+use crate::git::{DiffStats, GitClient, StatusEntry, TimelinePosition};
 use crate::github::{GitHubClient, PrInfo};
 use crate::ui::{
     centered_rect, Action, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
@@ -102,6 +102,7 @@ pub struct App {
     pub branch: String,
     pub diff_stats: DiffStats,
     pub selected_pr: Option<PrInfo>,
+    pub suggested_files: Vec<StatusEntry>,
 
     // Notifications
     pub toast: Option<Toast>,
@@ -151,6 +152,7 @@ impl App {
             branch,
             diff_stats: DiffStats::default(),
             selected_pr: None,
+            suggested_files: vec![],
             toast: None,
             gh_available,
             tick_count: 0,
@@ -211,7 +213,12 @@ impl App {
             self.selected_pr = None;
             // Reset timeline to default when branch changes
             self.timeline_position = TimelinePosition::default();
+            // Clear and reload suggestions for new branch
+            self.suggested_files = vec![];
         }
+
+        // Start loading suggestions in background (if not already loading)
+        self.start_suggestions_loading();
 
         // Force PR list reload on manual refresh
         self.last_pr_list_poll = Instant::now() - self.config.timing.pr_poll_interval - Duration::from_secs(1);
@@ -226,7 +233,14 @@ impl App {
     /// Skips branch check and PR list reload
     fn refresh_timeline(&mut self) -> Result<()> {
         // Load files based on new timeline position
-        let files = self.git.status_at_position(self.timeline_position)?;
+        let files = if matches!(self.timeline_position, TimelinePosition::FullDiffExtended) {
+            // For FullDiffExtended, use FullDiff files + cached suggestions
+            let mut entries = self.git.status_at_position(TimelinePosition::FullDiff)?;
+            entries.extend(self.suggested_files.clone());
+            entries
+        } else {
+            self.git.status_at_position(self.timeline_position)?
+        };
         self.file_list_state.set_files(files);
 
         // Update preview with new diff
@@ -243,6 +257,27 @@ impl App {
         if !already_loaded && !already_loading {
             self.async_loader.load_pr_details(pr_number);
         }
+    }
+
+    /// Start background loading of suggested files (co-change analysis)
+    fn start_suggestions_loading(&mut self) {
+        if self.async_loader.is_suggestions_loading() {
+            return;
+        }
+
+        // Get current changed files to analyze
+        let changed_files: Vec<String> = self.file_list_state.files
+            .iter()
+            .filter(|f| !f.suggested) // Exclude already-suggested files
+            .map(|f| f.path.clone())
+            .collect();
+
+        if changed_files.is_empty() {
+            return;
+        }
+
+        let repo_path = self.git.path().to_path_buf();
+        self.async_loader.load_suggestions(repo_path, changed_files);
     }
 
     /// Apply full PR details to state
@@ -302,6 +337,15 @@ impl App {
             // Update preview to show loaded content or clear loading state
             if self.focused == FocusedWindow::PrList {
                 self.show_selected_pr_in_preview();
+            }
+        }
+
+        // Poll for completed suggestions loading
+        if let Some(suggestions) = self.async_loader.poll_suggestions() {
+            self.suggested_files = suggestions;
+            // If currently on FullDiffExtended, refresh to show new suggestions
+            if matches!(self.timeline_position, TimelinePosition::FullDiffExtended) {
+                let _ = self.refresh_timeline();
             }
         }
 
@@ -947,10 +991,19 @@ impl App {
         spans.push(Span::styled("]", primary_bold));
         spans.push(Span::styled("─", primary_bold));
 
-        // [all+] marker (extended with suggestions)
+        // [all+] marker (extended with suggestions) - show loading state
         let all_ext_selected = matches!(self.timeline_position, TimelinePosition::FullDiffExtended);
+        let suggestions_loading = self.async_loader.is_suggestions_loading();
         spans.push(Span::styled("[", primary_bold));
-        spans.push(Span::styled("all+", if all_ext_selected { highlight_bold } else { primary_bold }));
+        let all_plus_label = if suggestions_loading {
+            // Animate loading indicator
+            let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let frame = spinner[self.tick_count % spinner.len()];
+            format!("all{}", frame)
+        } else {
+            "all+".to_string()
+        };
+        spans.push(Span::styled(all_plus_label, if all_ext_selected { highlight_bold } else { primary_bold }));
         spans.push(Span::styled("]", primary_bold));
         spans.push(Span::styled("─", primary_bold));
 

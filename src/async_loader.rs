@@ -1,11 +1,13 @@
-//! Async loading utilities for PR data
+//! Async loading utilities for PR data and git analysis
 
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread;
 
+use crate::git::{GitClient, StatusEntry};
 use crate::github::{GitHubClient, PrInfo, PrSummary};
 
-/// Manages async loading of PR data
+/// Manages async loading of PR data and git analysis
 pub struct AsyncLoader {
     // PR list loading
     pr_list_rx: Option<Receiver<Vec<PrSummary>>>,
@@ -15,6 +17,10 @@ pub struct AsyncLoader {
     pr_detail_rx: Option<Receiver<Option<PrInfo>>>,
     pr_detail_loading: bool,
     pr_detail_number: Option<u64>,
+
+    // Suggested files loading (co-change analysis)
+    suggestions_rx: Option<Receiver<Vec<StatusEntry>>>,
+    suggestions_loading: bool,
 }
 
 impl Default for AsyncLoader {
@@ -31,6 +37,8 @@ impl AsyncLoader {
             pr_detail_rx: None,
             pr_detail_loading: false,
             pr_detail_number: None,
+            suggestions_rx: None,
+            suggestions_loading: false,
         }
     }
 
@@ -148,6 +156,62 @@ impl AsyncLoader {
                 self.pr_detail_loading = false;
                 self.pr_detail_rx = None;
                 self.pr_detail_number = None;
+                None
+            }
+            Err(TryRecvError::Empty) => None,
+        }
+    }
+
+    /// Check if suggestions are currently loading
+    pub fn is_suggestions_loading(&self) -> bool {
+        self.suggestions_loading
+    }
+
+    /// Spawn background thread to analyze co-changes and find related files
+    pub fn load_suggestions(&mut self, repo_path: PathBuf, changed_files: Vec<String>) {
+        if self.suggestions_loading {
+            return;
+        }
+
+        let (tx, rx) = mpsc::channel();
+        self.suggestions_rx = Some(rx);
+        self.suggestions_loading = true;
+
+        thread::spawn(move || {
+            match GitClient::open(&repo_path) {
+                Ok(git) => {
+                    match git.find_related_files(&changed_files, 10) {
+                        Ok(suggestions) => {
+                            log::debug!("Found {} suggested files", suggestions.len());
+                            let _ = tx.send(suggestions);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to find related files: {}", e);
+                            let _ = tx.send(vec![]);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Failed to open repo for suggestions: {}", e);
+                    let _ = tx.send(vec![]);
+                }
+            }
+        });
+    }
+
+    /// Poll for completed suggestions loading
+    pub fn poll_suggestions(&mut self) -> Option<Vec<StatusEntry>> {
+        let rx = self.suggestions_rx.as_ref()?;
+        match rx.try_recv() {
+            Ok(suggestions) => {
+                self.suggestions_loading = false;
+                self.suggestions_rx = None;
+                Some(suggestions)
+            }
+            Err(TryRecvError::Disconnected) => {
+                log::debug!("Suggestions loader disconnected");
+                self.suggestions_loading = false;
+                self.suggestions_rx = None;
                 None
             }
             Err(TryRecvError::Empty) => None,
