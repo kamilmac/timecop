@@ -48,15 +48,15 @@ impl<'a> Widget for HelpModal<'a> {
             Line::from(""),
             Line::from(Span::styled("Timeline", self.colors.style_header())),
             Line::from(Span::styled(
-                "  T─I─M─E─C─O─P─○─○─○─ ... ─○─○─○─[all]─[wip]",
+                "  T─I─M─E─C─O─P─○─○─○─ ... ─○─○─○─[all]─[wip]─[browse]",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "                -16          -1   all   wip",
+                "                -16          -1   all   wip   browse",
                 self.colors.style_muted(),
             )),
             Line::from(Span::styled(
-                "  ← older                           newer →",
+                "  ← older                              newer / files →",
                 self.colors.style_muted(),
             )),
             Line::from(""),
@@ -84,6 +84,7 @@ impl<'a> Widget for HelpModal<'a> {
             format_binding("a", "Approve", self.colors),
             format_binding("x", "Request changes", self.colors),
             format_binding("c", "Comment (PR or line)", self.colors),
+            format_binding("Ctrl+R", "Reply to comment (on comment line)", self.colors),
             Line::from(""),
             Line::from(Span::styled(
                 "Press ? or Esc to close",
