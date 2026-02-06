@@ -15,7 +15,6 @@ pub enum ReviewAction {
     RequestChanges { pr_number: u64 },
     Comment { pr_number: u64 },
     LineComment { pr_number: u64, path: String, line: u32 },
-    CheckoutPr { pr_number: u64, branch: String },
 }
 
 impl ReviewAction {
@@ -27,7 +26,6 @@ impl ReviewAction {
             Self::LineComment { pr_number, path, line } => {
                 format!("Comment on {}:{} - PR #{}", path, line, pr_number)
             }
-            Self::CheckoutPr { pr_number, .. } => format!("Checkout PR #{}", pr_number),
         }
     }
 
@@ -38,7 +36,6 @@ impl ReviewAction {
     pub fn confirmation_message(&self) -> Option<&str> {
         match self {
             Self::Approve { .. } => Some("Are you sure you want to approve this PR?"),
-            Self::CheckoutPr { .. } => Some("Switch to this PR branch?"),
             _ => None,
         }
     }

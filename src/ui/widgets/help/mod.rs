@@ -1,11 +1,54 @@
+use crossterm::event::KeyEvent;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, StatefulWidget, Widget, Wrap},
 };
 
 use crate::config::Colors;
+use crate::event::KeyInput;
+
+/// Help modal state
+#[derive(Debug, Default)]
+pub struct HelpModalState {
+    pub scroll: usize,
+    content_height: usize,
+}
+
+impl HelpModalState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn handle_key(&mut self, key: &KeyEvent) {
+        if KeyInput::is_down(key) {
+            self.scroll_down(1);
+        } else if KeyInput::is_up(key) {
+            self.scroll_up(1);
+        } else if KeyInput::is_fast_down(key) {
+            self.scroll_down(5);
+        } else if KeyInput::is_fast_up(key) {
+            self.scroll_up(5);
+        } else if KeyInput::is_top(key) {
+            self.scroll = 0;
+        } else if KeyInput::is_bottom(key) {
+            self.scroll = self.content_height.saturating_sub(1);
+        }
+    }
+
+    fn scroll_down(&mut self, n: usize) {
+        self.scroll = self.scroll.saturating_add(n);
+    }
+
+    fn scroll_up(&mut self, n: usize) {
+        self.scroll = self.scroll.saturating_sub(n);
+    }
+
+    pub fn set_content_height(&mut self, height: usize) {
+        self.content_height = height;
+    }
+}
 
 /// Help modal widget
 pub struct HelpModal<'a> {
@@ -16,26 +59,9 @@ impl<'a> HelpModal<'a> {
     pub fn new(colors: &'a Colors) -> Self {
         Self { colors }
     }
-}
 
-impl<'a> Widget for HelpModal<'a> {
-    fn render(self, area: Rect, buf: &mut Buffer) {
-        // Clear background
-        Clear.render(area, buf);
-
-        let block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(self.colors.style_border_focused())
-            .title(Span::styled(
-                "TIMECOP - Time-Travel Code Review",
-                self.colors.style_header(),
-            ))
-            .title_alignment(Alignment::Center);
-
-        let inner = block.inner(area);
-        block.render(area, buf);
-
-        let help_text = vec![
+    fn build_help_text(&self) -> Vec<Line<'a>> {
+        vec![
             Line::from(""),
             Line::from(Span::styled(
                 "  Navigate through commit history. The TIMECOP title is your timeline.",
@@ -86,12 +112,45 @@ impl<'a> Widget for HelpModal<'a> {
             format_binding("c", "Comment (PR or line)", self.colors),
             Line::from(""),
             Line::from(Span::styled(
-                "Press ? or Esc to close",
+                "Press ? or Esc to close  |  j/k to scroll",
                 self.colors.style_muted(),
             )),
-        ];
+        ]
+    }
+}
 
-        let paragraph = Paragraph::new(help_text).wrap(Wrap { trim: false });
+impl<'a> StatefulWidget for HelpModal<'a> {
+    type State = HelpModalState;
+
+    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        // Clear background
+        Clear.render(area, buf);
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(self.colors.style_border_focused())
+            .title(Span::styled(
+                "TIMECOP - Time-Travel Code Review",
+                self.colors.style_header(),
+            ))
+            .title_alignment(Alignment::Center);
+
+        let inner = block.inner(area);
+        block.render(area, buf);
+
+        let help_text = self.build_help_text();
+        let content_height = help_text.len();
+        state.set_content_height(content_height);
+
+        // Clamp scroll to valid range
+        let max_scroll = content_height.saturating_sub(inner.height as usize);
+        if state.scroll > max_scroll {
+            state.scroll = max_scroll;
+        }
+
+        let paragraph = Paragraph::new(help_text)
+            .wrap(Wrap { trim: false })
+            .scroll((state.scroll as u16, 0));
 
         paragraph.render(inner, buf);
     }
