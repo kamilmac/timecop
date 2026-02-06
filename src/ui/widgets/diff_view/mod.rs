@@ -205,17 +205,29 @@ impl DiffViewState {
             return lines;
         }
 
+        // Build comment threads: group replies with their parent comments
+        let mut threads: std::collections::HashMap<u64, Vec<&crate::github::Comment>> = std::collections::HashMap::new();
+        let mut root_comments: Vec<&crate::github::Comment> = Vec::new();
+
+        for comment in comments {
+            if let Some(parent_id) = comment.in_reply_to_id {
+                threads.entry(parent_id).or_default().push(comment);
+            } else {
+                root_comments.push(comment);
+            }
+        }
+
         let mut result = Vec::with_capacity(lines.len() + comments.len() * 2);
         let wrap_width = 120; // Wrap comments at this width
-        let mut rendered_comments: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut rendered_comments: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
         for line in lines {
             result.push(line.clone());
 
-            // Check if there are comments for this line
-            for (idx, comment) in comments.iter().enumerate() {
+            // Check if there are root comments for this line
+            for comment in &root_comments {
                 // Skip already rendered comments
-                if rendered_comments.contains(&idx) {
+                if rendered_comments.contains(&comment.id) {
                     continue;
                 }
 
@@ -235,27 +247,16 @@ impl DiffViewState {
                 };
 
                 if matches {
-                    rendered_comments.insert(idx);
-                    // Add comment header
-                    result.push(DiffLine {
-                        left_text: Some(format!("💬 {}", comment.author)),
-                        right_text: None,
-                        left_num: None,
-                        right_num: None,
-                        line_type: LineType::Comment,
-                        is_header: true,
-                    });
-                    // Add comment body lines with wrapping
-                    for body_line in comment.body.lines() {
-                        for wrapped in wrap_text(body_line, wrap_width) {
-                            result.push(DiffLine {
-                                left_text: Some(format!("   {}", wrapped)),
-                                right_text: None,
-                                left_num: None,
-                                right_num: None,
-                                line_type: LineType::Comment,
-                                is_header: true,
-                            });
+                    rendered_comments.insert(comment.id);
+
+                    // Render the root comment
+                    self.render_comment_to_lines(&mut result, comment, wrap_width, 0);
+
+                    // Render any replies (threaded)
+                    if let Some(replies) = threads.get(&comment.id) {
+                        for reply in replies {
+                            rendered_comments.insert(reply.id);
+                            self.render_comment_to_lines(&mut result, reply, wrap_width, 1);
                         }
                     }
                 }
@@ -263,6 +264,42 @@ impl DiffViewState {
         }
 
         result
+    }
+
+    fn render_comment_to_lines(
+        &self,
+        result: &mut Vec<DiffLine>,
+        comment: &crate::github::Comment,
+        wrap_width: usize,
+        indent_level: usize,
+    ) {
+        let indent = "  ".repeat(indent_level);
+        let reply_indicator = if indent_level > 0 { "↳ " } else { "" };
+
+        // Add comment header
+        result.push(DiffLine {
+            left_text: Some(format!("{}{}💬 {}", indent, reply_indicator, comment.author)),
+            right_text: None,
+            left_num: None,
+            right_num: None,
+            line_type: LineType::Comment,
+            is_header: true,
+        });
+
+        // Add comment body lines with wrapping
+        let body_indent = format!("{}   ", indent);
+        for body_line in comment.body.lines() {
+            for wrapped in wrap_text(body_line, wrap_width.saturating_sub(indent_level * 2)) {
+                result.push(DiffLine {
+                    left_text: Some(format!("{}{}", body_indent, wrapped)),
+                    right_text: None,
+                    left_num: None,
+                    right_num: None,
+                    line_type: LineType::Comment,
+                    is_header: true,
+                });
+            }
+        }
     }
 
     pub fn title(&self) -> String {
