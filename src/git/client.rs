@@ -3,7 +3,7 @@ use git2::{DiffOptions, Repository, StatusOptions};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::types::*;
+use super::types::{BlameInfo, DiffStats, FileBlame, FileStatus, StatusEntry};
 
 /// Git client using libgit2 for native performance
 pub struct GitClient {
@@ -569,5 +569,55 @@ impl GitClient {
                 Ok(entries)
             }
         }
+    }
+
+    /// Get blame information for a file
+    pub fn blame_file(&self, path: &str) -> Result<FileBlame> {
+        use chrono::{TimeZone, Utc};
+
+        let blame = self.repo.blame_file(std::path::Path::new(path), None)
+            .with_context(|| format!("Failed to get blame for {}", path))?;
+
+        let mut lines = Vec::new();
+
+        for (line_num, hunk) in blame.iter().enumerate() {
+            let sig = hunk.final_signature();
+            let author = sig.name().unwrap_or("Unknown").to_string();
+
+            // Format date
+            let time = sig.when();
+            let datetime = Utc.timestamp_opt(time.seconds(), 0)
+                .single()
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_default();
+
+            // Get commit info
+            let commit_id = hunk.final_commit_id();
+            let short_id = format!("{:.7}", commit_id);
+
+            let summary = self.repo.find_commit(commit_id)
+                .ok()
+                .and_then(|c| c.summary().map(|s| s.to_string()))
+                .unwrap_or_default();
+
+            lines.push(BlameInfo {
+                line: line_num + 1,
+                author,
+                date: datetime,
+                commit_id: short_id,
+                summary,
+            });
+        }
+
+        Ok(FileBlame {
+            path: path.to_string(),
+            lines,
+        })
+    }
+
+    /// Get blame info for a specific line
+    pub fn blame_line(&self, path: &str, line: usize) -> Result<Option<BlameInfo>> {
+        let blame = self.blame_file(path)?;
+        Ok(blame.lines.into_iter().find(|b| b.line == line))
     }
 }
