@@ -439,14 +439,16 @@ impl App {
             return Ok(());
         }
 
-        // Timeline navigation: , goes to next (older), . goes to prev (newer)
+        // Timeline navigation: , goes left (older), . goes right (newer)
         if KeyInput::is_timeline_next(&key) {
-            self.timeline_position = self.timeline_position.next(self.commit_count);
+            // , key - go older (left on timeline)
+            self.timeline_position = self.timeline_position.prev(self.commit_count);
             self.refresh_timeline()?;
             return Ok(());
         }
         if KeyInput::is_timeline_prev(&key) {
-            self.timeline_position = self.timeline_position.prev();
+            // . key - go newer (right on timeline)
+            self.timeline_position = self.timeline_position.next(self.commit_count);
             self.refresh_timeline()?;
             return Ok(());
         }
@@ -955,9 +957,9 @@ impl App {
         let dim_style = ratatui::style::Style::default()
             .fg(colors.muted);
 
-        // Timeline layout (left to right):
-        // T─I─M─E─C─O─P─○─○─○─○─○─○─○─○─○─○─○─○─[all]─[wip]
-        //               -12...............-1   all   wip
+        // Timeline layout (left to right, older to newer):
+        // T─I─M─E─C─O─P─○─○─○─●─[full]─[files]
+        //               -3-2-1 wip full  files
 
         let mut spans = Vec::new();
 
@@ -970,13 +972,11 @@ impl App {
             spans.push(Span::styled(*elem, primary_bold));
         }
 
-        // Separator (only if there are commits)
+        // Separator (only if there are commits or wip)
         let num_commits = self.commit_count.min(16);
-        if num_commits > 0 {
-            spans.push(Span::styled("─", primary_bold));
-        }
+        spans.push(Span::styled("─", primary_bold));
 
-        // Commit dots (only show available commits, max 16)
+        // Commit dots (only show available commits, max 16) - oldest first
         for i in (1..=num_commits).rev() {
             let is_selected = matches!(self.timeline_position, TimelinePosition::CommitDiff(n) if n == i);
             let style = if is_selected { highlight_bold } else { primary_bold };
@@ -984,31 +984,30 @@ impl App {
             spans.push(Span::styled("─", if is_selected { highlight_bold } else { primary_bold }));
         }
 
-        // [all] marker
-        let all_selected = matches!(self.timeline_position, TimelinePosition::FullDiff);
-        spans.push(Span::styled("[", primary_bold));
-        spans.push(Span::styled("all", if all_selected { highlight_bold } else { primary_bold }));
-        spans.push(Span::styled("]", primary_bold));
-        spans.push(Span::styled("─", primary_bold));
-
-        // [wip] marker
+        // Wip marker (● filled dot - uncommitted changes, like a commit in progress)
         let wip_selected = matches!(self.timeline_position, TimelinePosition::Wip);
+        let wip_style = if wip_selected { highlight_bold } else { primary_bold };
+        spans.push(Span::styled("●", wip_style));
+        spans.push(Span::styled("─", if wip_selected { highlight_bold } else { primary_bold }));
+
+        // [full] marker (full diff - all committed changes)
+        let full_selected = matches!(self.timeline_position, TimelinePosition::FullDiff);
         spans.push(Span::styled("[", primary_bold));
-        spans.push(Span::styled("wip", if wip_selected { highlight_bold } else { primary_bold }));
+        spans.push(Span::styled("full", if full_selected { highlight_bold } else { primary_bold }));
         spans.push(Span::styled("]", primary_bold));
         spans.push(Span::styled("─", primary_bold));
 
-        // [browse] marker
-        let browse_selected = matches!(self.timeline_position, TimelinePosition::Browse);
+        // [files] marker (browse all files)
+        let files_selected = matches!(self.timeline_position, TimelinePosition::Browse);
         spans.push(Span::styled("[", primary_bold));
-        spans.push(Span::styled("browse", if browse_selected { highlight_bold } else { primary_bold }));
+        spans.push(Span::styled("files", if files_selected { highlight_bold } else { primary_bold }));
         spans.push(Span::styled("]", primary_bold));
 
         // State label
         let state_label = match self.timeline_position {
-            TimelinePosition::Browse => "browse",
+            TimelinePosition::Browse => "files",
             TimelinePosition::Wip => "wip",
-            TimelinePosition::FullDiff => "all changes",
+            TimelinePosition::FullDiff => "full diff",
             TimelinePosition::CommitDiff(n) => match n {
                 1 => "-1", 2 => "-2", 3 => "-3", 4 => "-4", 5 => "-5",
                 6 => "-6", 7 => "-7", 8 => "-8", 9 => "-9", 10 => "-10",
@@ -1044,9 +1043,9 @@ impl App {
 
         // Right: position info
         let right_content = match self.timeline_position {
-            TimelinePosition::Browse => "browse all files ".to_string(),
-            TimelinePosition::FullDiff => "all changes (base → head) ".to_string(),
-            TimelinePosition::Wip => "uncommitted changes ".to_string(),
+            TimelinePosition::Browse => "all files ".to_string(),
+            TimelinePosition::FullDiff => "full diff (base → head) ".to_string(),
+            TimelinePosition::Wip => "uncommitted (wip) ".to_string(),
             TimelinePosition::CommitDiff(n) => {
                 if let Some(msg) = self.timeline_commit_message() {
                     let max_len = 40;
@@ -1077,9 +1076,9 @@ impl App {
     /// Generate file list title
     fn file_list_title(&self) -> String {
         if matches!(self.timeline_position, TimelinePosition::Browse) {
-            format!("Browse ({})", self.file_list_state.file_count())
+            format!("All Files ({})", self.file_list_state.file_count())
         } else {
-            format!("Files ({})", self.file_list_state.file_count())
+            format!("Changed ({})", self.file_list_state.file_count())
         }
     }
 

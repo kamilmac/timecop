@@ -46,47 +46,47 @@ pub struct DiffStats {
 }
 
 /// Timeline position for viewing PR history
-/// Order: Browse → Wip → FullDiff → -1 → -2 → ... → -16
+/// Order (older → newer): -16 → ... → -1 → Wip → FullDiff → Browse
 /// FullDiff is the default (primary code review view)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimelinePosition {
-    /// Browse all files in repo (not just changed files)
-    Browse,
+    /// View changes from a single commit: HEAD~N → HEAD~(N-1)
+    CommitDiff(usize),
     /// View only uncommitted changes: HEAD → working tree
     Wip,
     /// View all committed changes: base → HEAD (default)
     #[default]
     FullDiff,
-    /// View changes from a single commit: HEAD~N → HEAD~(N-1)
-    CommitDiff(usize),
+    /// Browse all files in repo (not just changed files)
+    Browse,
 }
 
 impl TimelinePosition {
-    /// Move to next position (towards older commits: Browse → Wip → FullDiff → -1 → -2 → ...)
-    pub fn next(self, max_commits: usize) -> Self {
+    /// Move to next position (towards newer: -16 → ... → -1 → Wip → FullDiff → Browse)
+    pub fn next(self, _max_commits: usize) -> Self {
         match self {
-            Self::Browse => Self::Wip,
+            Self::CommitDiff(1) => Self::Wip,
+            Self::CommitDiff(n) => Self::CommitDiff(n - 1),
             Self::Wip => Self::FullDiff,
-            Self::FullDiff => {
+            Self::FullDiff => Self::Browse,
+            Self::Browse => Self::Browse, // Can't go newer than browse
+        }
+    }
+
+    /// Move to previous position (towards older: Browse → FullDiff → Wip → -1 → ... → -16)
+    pub fn prev(self, max_commits: usize) -> Self {
+        match self {
+            Self::Browse => Self::FullDiff,
+            Self::FullDiff => Self::Wip,
+            Self::Wip => {
                 if max_commits > 0 {
                     Self::CommitDiff(1)
                 } else {
-                    Self::FullDiff
+                    Self::Wip
                 }
             }
             Self::CommitDiff(n) if n < max_commits && n < 16 => Self::CommitDiff(n + 1),
             other => other,
-        }
-    }
-
-    /// Move to previous position (towards newer: ... → -1 → FullDiff → Wip → Browse)
-    pub fn prev(self) -> Self {
-        match self {
-            Self::Browse => Self::Browse, // Can't go newer than browse
-            Self::Wip => Self::Browse,
-            Self::FullDiff => Self::Wip,
-            Self::CommitDiff(1) => Self::FullDiff,
-            Self::CommitDiff(n) => Self::CommitDiff(n - 1),
         }
     }
 }
