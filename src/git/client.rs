@@ -99,7 +99,7 @@ impl GitClient {
             };
 
             let uncommitted = uncommitted_paths.contains(&path);
-            entries.push(StatusEntry { path: path.clone(), status, uncommitted, ignored: false, is_dir: false });
+            entries.push(StatusEntry { path: path.clone(), status, uncommitted, entry_type: EntryType::Tracked });
             seen_paths.insert(path);
         }
 
@@ -112,8 +112,7 @@ impl GitClient {
                     path: path.clone(),
                     status,
                     uncommitted: true,
-                    ignored: false,
-                    is_dir: false,
+                    entry_type: EntryType::Tracked,
                 });
             }
         }
@@ -171,8 +170,7 @@ impl GitClient {
                 path,
                 status,
                 uncommitted: true,
-                ignored: false,
-                is_dir: false,
+                entry_type: EntryType::Tracked,
             });
         }
 
@@ -529,8 +527,7 @@ impl GitClient {
                         path,
                         status,
                         uncommitted: false,
-                        ignored: false,
-                        is_dir: false,
+                        entry_type: EntryType::Tracked,
                     });
                 }
 
@@ -590,19 +587,18 @@ impl GitClient {
                         path: rel_path,
                         status: FileStatus::Unchanged,
                         uncommitted: false,
-                        ignored: true,
-                        is_dir: true,
+                        entry_type: EntryType::IgnoredDir,
                     });
                 } else {
                     self.walk_dir(&path, entries, depth + 1)?;
                 }
             } else {
+                let entry_type = if ignored { EntryType::Ignored } else { EntryType::Tracked };
                 entries.push(StatusEntry {
                     path: rel_path,
                     status: FileStatus::Unchanged,
                     uncommitted: false,
-                    ignored,
-                    is_dir: false,
+                    entry_type,
                 });
             }
         }

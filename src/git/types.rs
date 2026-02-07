@@ -28,21 +28,37 @@ impl fmt::Display for FileStatus {
     }
 }
 
+/// Type of entry in file listing
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum EntryType {
+    /// Normal tracked file
+    #[default]
+    Tracked,
+    /// Gitignored file (Browse mode only)
+    Ignored,
+    /// Gitignored directory - shown but not recursed into (Browse mode only)
+    IgnoredDir,
+}
+
+impl EntryType {
+    pub fn is_ignored(self) -> bool {
+        matches!(self, Self::Ignored | Self::IgnoredDir)
+    }
+
+    pub fn is_dir(self) -> bool {
+        matches!(self, Self::IgnoredDir)
+    }
+}
+
 /// A file or directory entry with its status
-///
-/// Used across all timeline modes. Some fields are mode-specific:
-/// - `ignored` and `is_dir`: Only populated in Browse mode (filesystem walk)
-/// - `uncommitted`: Only relevant in diff modes (Wip, FullDiff, CommitDiff)
 #[derive(Debug, Clone)]
 pub struct StatusEntry {
     pub path: String,
     pub status: FileStatus,
     /// True if file has uncommitted changes (diff modes only)
     pub uncommitted: bool,
-    /// True if file/dir is gitignored (Browse mode only)
-    pub ignored: bool,
-    /// True if this is a directory (Browse mode only, for ignored dirs)
-    pub is_dir: bool,
+    /// Entry type - tracked, ignored file, or ignored directory
+    pub entry_type: EntryType,
 }
 
 

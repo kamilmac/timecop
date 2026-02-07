@@ -206,7 +206,7 @@ fn build_tree(
 
     for file in files {
         let parts: Vec<&str> = file.path.split('/').collect();
-        insert_into_tree(&mut root_children, &parts, 0, file.status, file.is_dir);
+        insert_into_tree(&mut root_children, &parts, 0, file.status, file.entry_type.is_dir());
     }
 
     // Sort tree recursively (dirs first at each level, then alphabetically)
@@ -335,12 +335,12 @@ fn flatten_tree(
         // Check ignored status
         let ignored = if node.is_dir {
             // Check if directory itself is ignored, or all children are ignored
-            files.iter().any(|f| f.path == node.path && f.ignored && f.is_dir) ||
+            files.iter().any(|f| f.path == node.path && f.entry_type.is_dir() && f.entry_type.is_ignored()) ||
             (!children.is_empty() && children.iter().all(|child_path| {
-                files.iter().any(|f| &f.path == child_path && f.ignored)
+                files.iter().any(|f| &f.path == child_path && f.entry_type.is_ignored())
             }))
         } else {
-            files.iter().any(|f| f.path == node.path && f.ignored)
+            files.iter().any(|f| f.path == node.path && f.entry_type.is_ignored())
         };
 
         entries.push(TreeEntry {
