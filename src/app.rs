@@ -478,12 +478,9 @@ impl App {
                     self.on_focus_change();
                 }
                 FocusedWindow::PrList => {
-                    // Show confirmation before checking out PR
+                    // Checkout PR branch directly
                     if let Some(pr) = self.pr_list_panel_state.selected() {
-                        self.input_modal_state.show(ReviewAction::CheckoutPr {
-                            pr_number: pr.number,
-                            branch: pr.branch.clone(),
-                        });
+                        self.checkout_pr(pr.number)?;
                     }
                 }
                 FocusedWindow::Preview => {}
@@ -655,12 +652,7 @@ impl App {
             }
 
             Action::CheckoutPr(pr_number) => {
-                if let Some(pr) = self.pr_list_panel_state.prs.iter().find(|p| p.number == pr_number) {
-                    self.input_modal_state.show(ReviewAction::CheckoutPr {
-                        pr_number,
-                        branch: pr.branch.clone(),
-                    });
-                }
+                self.checkout_pr(pr_number)?;
             }
 
             Action::OpenReviewModal(review_type) => {
@@ -873,6 +865,26 @@ impl App {
         std::mem::replace(&mut self.pending_command, AppCommand::None)
     }
 
+    /// Checkout a PR branch directly
+    fn checkout_pr(&mut self, pr_number: u64) -> Result<()> {
+        // Block checkout if there are uncommitted changes
+        if self.git.has_uncommitted_changes() {
+            self.toast = Some(Toast::error("Commit or stash changes before switching branches"));
+            return Ok(());
+        }
+
+        match self.github.checkout_pr(pr_number) {
+            Ok(()) => {
+                self.toast = Some(Toast::success("Switched to PR branch"));
+                self.refresh()?;
+            }
+            Err(e) => {
+                self.toast = Some(Toast::error(format!("Checkout failed: {}", e)));
+            }
+        }
+        Ok(())
+    }
+
     /// Submit the review action from the input modal
     fn submit_review_action(&mut self) -> Result<()> {
         let Some(action) = self.input_modal_state.action.clone() else {
@@ -880,28 +892,6 @@ impl App {
         };
 
         let body = self.input_modal_state.take_input();
-
-        // Handle checkout separately (needs refresh after)
-        if let ReviewAction::CheckoutPr { pr_number, .. } = &action {
-            self.input_modal_state.hide();
-
-            // Block checkout if there are uncommitted changes
-            if self.git.has_uncommitted_changes() {
-                self.toast = Some(Toast::error("Commit or stash changes before switching branches"));
-                return Ok(());
-            }
-
-            match self.github.checkout_pr(*pr_number) {
-                Ok(()) => {
-                    self.toast = Some(Toast::success("Switched to PR branch"));
-                    self.refresh()?;
-                }
-                Err(e) => {
-                    self.toast = Some(Toast::error(format!("Checkout failed: {}", e)));
-                }
-            }
-            return Ok(());
-        }
 
         let result = match &action {
             ReviewAction::Approve { pr_number } => {
@@ -916,7 +906,6 @@ impl App {
             ReviewAction::LineComment { pr_number, path, line } => {
                 self.github.add_line_comment(*pr_number, path, *line, &body)
             }
-            ReviewAction::CheckoutPr { .. } => unreachable!(), // Handled above
         };
 
         match result {
@@ -929,7 +918,6 @@ impl App {
                     ReviewAction::RequestChanges { .. } => "Changes requested",
                     ReviewAction::Comment { .. } => "Comment posted",
                     ReviewAction::LineComment { .. } => "Line comment added",
-                    ReviewAction::CheckoutPr { .. } => unreachable!(),
                 };
                 self.toast = Some(Toast::success(success_msg));
 
