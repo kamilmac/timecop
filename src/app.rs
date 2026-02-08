@@ -124,6 +124,13 @@ pub struct App {
 
     // Layout areas for mouse hit testing
     layout_areas: Option<LayoutAreas>,
+
+    // Global file selection (persists across timeline switches)
+    selected_path: Option<String>,
+    // Per-file line positions in diff view
+    file_line_positions: HashMap<String, usize>,
+    // True after first FILES mode setup (to preserve expand/collapse state on subsequent entries)
+    browse_mode_initialized: bool,
 }
 
 impl App {
@@ -164,6 +171,9 @@ impl App {
             highlighter,
             config,
             layout_areas: None,
+            selected_path: None,
+            file_line_positions: HashMap::new(),
+            browse_mode_initialized: false,
         };
 
         // Initialize PR list panel
@@ -211,9 +221,10 @@ impl App {
             self.selected_pr = None;
             // Reset timeline to default when branch changes
             self.timeline_position = TimelinePosition::default();
-            // Force PR list reload on branch change
-            self.last_pr_list_poll = Instant::now() - self.config.timing.pr_poll_interval - Duration::from_secs(1);
         }
+
+        // Force PR list reload on manual refresh
+        self.last_pr_list_poll = Instant::now() - self.config.timing.pr_poll_interval - Duration::from_secs(1);
 
         // Update preview
         self.update_preview();
@@ -221,38 +232,96 @@ impl App {
         Ok(())
     }
 
-    /// Lightweight refresh for timeline navigation only
-    /// Skips branch check and PR list reload
-    fn refresh_timeline(&mut self) -> Result<()> {
-        // Load files based on new timeline position
-        let files = self.git.status_at_position(self.timeline_position)?;
+    /// Select a path in file list, or closest visible parent if path not found
+    fn select_path_or_parent(&mut self, path: &str) {
+        // Try exact match first
+        if let Some(idx) = self.file_list_state.entries.iter().position(|e| e.path == path) {
+            self.file_list_state.cursor = idx;
+            return;
+        }
 
-        // In browse mode, collapse all directories by default for better UX with large repos
-        if matches!(self.timeline_position, TimelinePosition::Browse) {
-            // Collect all directory paths from files
-            let mut dirs = std::collections::HashSet::new();
-            for file in &files {
+        // Walk up path to find closest visible parent
+        let file_path = std::path::Path::new(path);
+        let mut components: Vec<_> = file_path.components().collect();
+        while !components.is_empty() {
+            components.pop();
+            if components.is_empty() {
+                break;
+            }
+            let parent: std::path::PathBuf = components.iter().collect();
+            let parent_str = parent.to_string_lossy();
+            if let Some(idx) = self.file_list_state.entries.iter().position(|e| e.path == parent_str) {
+                self.file_list_state.cursor = idx;
+                return;
+            }
+        }
+        // No match found, keep current cursor or go to first entry
+    }
+
+    /// Switch to a new timeline position, preserving view state
+    fn switch_timeline(&mut self, new_position: TimelinePosition) -> Result<()> {
+        if new_position == self.timeline_position {
+            return Ok(());
+        }
+
+        // Save current file's line position
+        if let Some(path) = self.diff_view_state.get_current_file() {
+            if self.diff_view_state.cursor > 0 {
+                self.file_line_positions.insert(path.to_string(), self.diff_view_state.cursor);
+            }
+        }
+
+        // Update selected_path from current selection
+        if let Some(entry) = self.file_list_state.selected() {
+            self.selected_path = Some(entry.path.clone());
+        }
+
+        // Switch position
+        self.timeline_position = new_position;
+
+        // Load files for new position (collapsed state is preserved globally)
+        let files = self.git.status_at_position(self.timeline_position)?;
+        self.file_list_state.set_files(files);
+
+        // First entry to Browse mode: collapse all except path to selected file
+        if matches!(new_position, TimelinePosition::Browse) && !self.browse_mode_initialized {
+            // Collect all directory paths
+            let mut all_dirs = std::collections::HashSet::new();
+            for file in &self.file_list_state.files {
                 let path = std::path::Path::new(&file.path);
                 let mut current = std::path::PathBuf::new();
                 for component in path.components() {
-                    if current.as_os_str().is_empty() {
-                        current.push(component);
-                    } else {
-                        current.push(component);
-                    }
-                    // Only add parent directories (not the file itself)
+                    current.push(component);
                     if current.to_string_lossy() != file.path {
-                        dirs.insert(current.to_string_lossy().to_string());
+                        all_dirs.insert(current.to_string_lossy().to_string());
                     }
                 }
             }
-            self.file_list_state.collapsed = dirs;
-        } else {
-            // Clear collapsed state when leaving browse mode
-            self.file_list_state.collapsed.clear();
+
+            // Start with all collapsed
+            self.file_list_state.collapsed = all_dirs;
+
+            // Expand path to selected file
+            if let Some(ref path) = self.selected_path {
+                let file_path = std::path::Path::new(path);
+                let mut current = std::path::PathBuf::new();
+                for component in file_path.components() {
+                    current.push(component);
+                    let dir_str = current.to_string_lossy().to_string();
+                    if dir_str != *path {
+                        self.file_list_state.collapsed.remove(&dir_str);
+                    }
+                }
+            }
+
+            self.file_list_state.rebuild_tree();
+            self.browse_mode_initialized = true;
         }
 
-        self.file_list_state.set_files(files);
+        // Select the remembered path or closest parent
+        if let Some(ref path) = self.selected_path.clone() {
+            self.select_path_or_parent(path);
+        }
 
         // Update preview with new diff
         self.update_preview();
@@ -442,14 +511,14 @@ impl App {
         // Timeline navigation: , goes left (older), . goes right (newer)
         if KeyInput::is_timeline_next(&key) {
             // , key - go older (left on timeline)
-            self.timeline_position = self.timeline_position.prev(self.commit_count);
-            self.refresh_timeline()?;
+            let new_pos = self.timeline_position.prev(self.commit_count);
+            self.switch_timeline(new_pos)?;
             return Ok(());
         }
         if KeyInput::is_timeline_prev(&key) {
             // . key - go newer (right on timeline)
-            self.timeline_position = self.timeline_position.next();
-            self.refresh_timeline()?;
+            let new_pos = self.timeline_position.next();
+            self.switch_timeline(new_pos)?;
             return Ok(());
         }
 
@@ -672,6 +741,13 @@ impl App {
             return;
         }
 
+        // Save current file's line position before switching
+        if let Some(current_path) = self.diff_view_state.get_current_file() {
+            if self.diff_view_state.cursor > 0 {
+                self.file_line_positions.insert(current_path.to_string(), self.diff_view_state.cursor);
+            }
+        }
+
         let is_browse_mode = matches!(self.timeline_position, TimelinePosition::Browse);
 
         let content = if let Some(entry) = self.file_list_state.selected() {
@@ -703,6 +779,7 @@ impl App {
                     content: file_content,
                 };
                 self.diff_view_state.set_content_highlighted(content, &self.highlighter);
+                self.restore_file_line_position();
                 return;
             } else {
                 // File selected - diff with syntax highlighting at timeline position
@@ -715,6 +792,7 @@ impl App {
                     content: diff,
                 };
                 self.diff_view_state.set_content_highlighted(content, &self.highlighter);
+                self.restore_file_line_position();
                 return;
             }
         } else {
@@ -722,6 +800,16 @@ impl App {
         };
 
         self.diff_view_state.set_content(content);
+    }
+
+    /// Restore line position for current file from cache
+    fn restore_file_line_position(&mut self) {
+        if let Some(path) = self.diff_view_state.get_current_file() {
+            if let Some(&line) = self.file_line_positions.get(path) {
+                let max_line = self.diff_view_state.lines.len().saturating_sub(1);
+                self.diff_view_state.cursor = line.min(max_line);
+            }
+        }
     }
 
     fn yank_path(&self) {
