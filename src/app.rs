@@ -221,9 +221,10 @@ impl App {
             self.selected_pr = None;
             // Reset timeline to default when branch changes
             self.timeline_position = TimelinePosition::default();
-            // Force PR list reload on branch change
-            self.last_pr_list_poll = Instant::now() - self.config.timing.pr_poll_interval - Duration::from_secs(1);
         }
+
+        // Force PR list reload on manual refresh
+        self.last_pr_list_poll = Instant::now() - self.config.timing.pr_poll_interval - Duration::from_secs(1);
 
         // Update preview
         self.update_preview();
