@@ -279,3 +279,227 @@ fn get_indent_level(line: &str, indent_unit: usize) -> usize {
     let leading_whitespace = line.len() - line.trim_start().len();
     leading_whitespace / indent_unit
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- is_binary ---
+
+    #[test]
+    fn is_binary_detects_null_bytes() {
+        assert!(is_binary("hello\0world"));
+    }
+
+    #[test]
+    fn is_binary_false_for_normal_text() {
+        assert!(!is_binary("fn main() {\n    println!(\"hello\");\n}"));
+    }
+
+    #[test]
+    fn is_binary_false_for_empty() {
+        assert!(!is_binary(""));
+    }
+
+    // --- parse_hunk_header ---
+
+    #[test]
+    fn parse_hunk_header_standard() {
+        assert_eq!(parse_hunk_header("@@ -10,5 +15,8 @@"), Some((10, 15)));
+    }
+
+    #[test]
+    fn parse_hunk_header_single_line() {
+        assert_eq!(parse_hunk_header("@@ -1 +1 @@"), Some((1, 1)));
+    }
+
+    #[test]
+    fn parse_hunk_header_with_context() {
+        assert_eq!(
+            parse_hunk_header("@@ -100,20 +110,25 @@ fn some_function()"),
+            Some((100, 110))
+        );
+    }
+
+    #[test]
+    fn parse_hunk_header_invalid() {
+        assert_eq!(parse_hunk_header("not a header"), None);
+        assert_eq!(parse_hunk_header("@@"), None);
+    }
+
+    // --- parse_diff ---
+
+    #[test]
+    fn parse_diff_added_lines() {
+        let diff = "@@ -1,2 +1,3 @@\n a\n+b\n c\n";
+        let lines = parse_diff(diff);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].line_type, LineType::Context);
+        assert_eq!(lines[1].line_type, LineType::Added);
+        assert_eq!(lines[1].right_text.as_deref(), Some("b"));
+        assert_eq!(lines[1].left_text, None);
+        assert_eq!(lines[2].line_type, LineType::Context);
+    }
+
+    #[test]
+    fn parse_diff_removed_lines() {
+        let diff = "@@ -1,3 +1,2 @@\n a\n-b\n c\n";
+        let lines = parse_diff(diff);
+        assert_eq!(lines[1].line_type, LineType::Removed);
+        assert_eq!(lines[1].left_text.as_deref(), Some("b"));
+        assert_eq!(lines[1].right_text, None);
+    }
+
+    #[test]
+    fn parse_diff_line_numbers() {
+        let diff = "@@ -5,3 +10,3 @@\n a\n-b\n+c\n";
+        let lines = parse_diff(diff);
+        // Context line: left=5, right=10
+        assert_eq!(lines[0].left_num, Some(5));
+        assert_eq!(lines[0].right_num, Some(10));
+        // Removed: left=6
+        assert_eq!(lines[1].left_num, Some(6));
+        assert_eq!(lines[1].right_num, None);
+        // Added: right=11
+        assert_eq!(lines[2].left_num, None);
+        assert_eq!(lines[2].right_num, Some(11));
+    }
+
+    #[test]
+    fn parse_diff_headers() {
+        let diff = "diff --git a/foo.rs b/foo.rs\n--- a/foo.rs\n+++ b/foo.rs\n";
+        let lines = parse_diff(diff);
+        assert!(lines.iter().all(|l| l.is_header));
+        assert!(lines.iter().all(|l| l.line_type == LineType::Header));
+    }
+
+    #[test]
+    fn parse_diff_empty() {
+        assert!(parse_diff("").is_empty());
+    }
+
+    // --- extract_diff_sides ---
+
+    #[test]
+    fn extract_diff_sides_splits_correctly() {
+        let diff = "@@ -1,3 +1,3 @@\n old\n-removed\n+added\n context\n";
+        let (left, right) = extract_diff_sides(diff);
+        // Left gets: "old" (context without prefix ' '), "removed" (- line)...
+        // Wait, "old" starts with space so it's context
+        // Actually " old" starts with space
+        assert!(left.contains(&"removed".to_string()));
+        assert!(right.contains(&"added".to_string()));
+        // Context appears in both
+        assert!(left.contains(&"old".to_string()));
+        assert!(right.contains(&"old".to_string()));
+    }
+
+    #[test]
+    fn extract_diff_sides_skips_headers() {
+        let diff = "diff --git a/f b/f\n--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n";
+        let (left, right) = extract_diff_sides(diff);
+        assert_eq!(left, vec!["old"]);
+        assert_eq!(right, vec!["new"]);
+    }
+
+    // --- wrap_text ---
+
+    #[test]
+    fn wrap_text_fits_in_width() {
+        assert_eq!(wrap_text("hello world", 20), vec!["hello world"]);
+    }
+
+    #[test]
+    fn wrap_text_wraps_at_boundary() {
+        assert_eq!(wrap_text("hello world", 5), vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn wrap_text_long_word() {
+        let result = wrap_text("abcdefghij", 4);
+        assert_eq!(result, vec!["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn wrap_text_empty() {
+        assert_eq!(wrap_text("", 10), vec![""]);
+    }
+
+    // --- truncate_or_pad ---
+
+    #[test]
+    fn truncate_or_pad_short_string() {
+        let result = truncate_or_pad("hi", 5);
+        assert_eq!(result, "hi   ");
+    }
+
+    #[test]
+    fn truncate_or_pad_exact_fit() {
+        let result = truncate_or_pad("hello", 5);
+        assert_eq!(result, "hello");
+    }
+
+    #[test]
+    fn truncate_or_pad_long_string() {
+        let result = truncate_or_pad("hello world", 5);
+        assert_eq!(result.chars().count(), 5);
+        assert!(result.ends_with('\u{2026}')); // ends with ellipsis
+    }
+
+    // --- parse_file_content ---
+
+    #[test]
+    fn parse_file_content_filters_by_indent() {
+        let content = "fn main() {\n    let x = 1;\n        nested();\n}\n";
+        let lines = parse_file_content(content, 0);
+        // Only top-level lines (indent 0)
+        assert!(lines.iter().all(|l| {
+            let text = l.left_text.as_deref().unwrap_or("");
+            let indent = text.len() - text.trim_start().len();
+            indent == 0
+        }));
+    }
+
+    #[test]
+    fn parse_file_content_line_numbers() {
+        let content = "line1\nline2\nline3\n";
+        let lines = parse_file_content(content, 10);
+        assert_eq!(lines[0].left_num, Some(1));
+        assert_eq!(lines[1].left_num, Some(2));
+        assert_eq!(lines[2].left_num, Some(3));
+    }
+
+    // --- detect_indent_unit ---
+
+    #[test]
+    fn detect_indent_unit_two_spaces() {
+        assert_eq!(detect_indent_unit("fn main() {\n  let x = 1;\n}\n"), 2);
+    }
+
+    #[test]
+    fn detect_indent_unit_four_spaces() {
+        assert_eq!(detect_indent_unit("fn main() {\n    let x = 1;\n}\n"), 4);
+    }
+
+    #[test]
+    fn detect_indent_unit_no_indent() {
+        assert_eq!(detect_indent_unit("a\nb\nc\n"), 4); // default
+    }
+
+    // --- get_indent_level ---
+
+    #[test]
+    fn get_indent_level_zero() {
+        assert_eq!(get_indent_level("hello", 4), 0);
+    }
+
+    #[test]
+    fn get_indent_level_one() {
+        assert_eq!(get_indent_level("    hello", 4), 1);
+    }
+
+    #[test]
+    fn get_indent_level_empty_line() {
+        assert_eq!(get_indent_level("   ", 4), usize::MAX);
+    }
+}

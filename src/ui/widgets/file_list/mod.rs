@@ -429,6 +429,150 @@ impl<'a> StatefulWidget for FileList<'a> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::git::EntryType;
+
+    fn make_entry(path: &str, status: FileStatus) -> StatusEntry {
+        StatusEntry {
+            path: path.to_string(),
+            status,
+            uncommitted: false,
+            entry_type: EntryType::Tracked,
+        }
+    }
+
+    // --- Tree building ---
+
+    #[test]
+    fn build_tree_empty() {
+        let entries = build_tree(&[], &HashSet::new(), &HashMap::new());
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn build_tree_single_file() {
+        let files = vec![make_entry("README.md", FileStatus::Added)];
+        let entries = build_tree(&files, &HashSet::new(), &HashMap::new());
+        // Root + file
+        assert_eq!(entries.len(), 2);
+        assert!(entries[0].is_root);
+        assert_eq!(entries[1].display, "README.md");
+        assert_eq!(entries[1].status, FileStatus::Added);
+    }
+
+    #[test]
+    fn build_tree_nested_structure() {
+        let files = vec![
+            make_entry("src/main.rs", FileStatus::Modified),
+            make_entry("src/lib.rs", FileStatus::Added),
+            make_entry("README.md", FileStatus::Unchanged),
+        ];
+        let entries = build_tree(&files, &HashSet::new(), &HashMap::new());
+        // Root, src/ dir, lib.rs, main.rs, README.md
+        assert_eq!(entries.len(), 5);
+        assert!(entries[0].is_root); // ./
+        assert!(entries[1].is_dir);  // src/
+        assert_eq!(entries[1].display, "src");
+        // Files under src sorted alphabetically
+        assert_eq!(entries[2].display, "lib.rs");
+        assert_eq!(entries[3].display, "main.rs");
+        // Top-level file after directories
+        assert_eq!(entries[4].display, "README.md");
+    }
+
+    #[test]
+    fn build_tree_dirs_sorted_before_files() {
+        let files = vec![
+            make_entry("zebra.txt", FileStatus::Added),
+            make_entry("alpha/file.rs", FileStatus::Modified),
+        ];
+        let entries = build_tree(&files, &HashSet::new(), &HashMap::new());
+        // Root, alpha/ dir, file.rs, zebra.txt
+        assert!(entries[1].is_dir);
+        assert_eq!(entries[1].display, "alpha");
+        assert_eq!(entries[3].display, "zebra.txt");
+    }
+
+    #[test]
+    fn build_tree_collapsed_root_hides_children() {
+        let files = vec![make_entry("a.txt", FileStatus::Added)];
+        let mut collapsed = HashSet::new();
+        collapsed.insert(String::new()); // collapse root
+        let entries = build_tree(&files, &collapsed, &HashMap::new());
+        assert_eq!(entries.len(), 1); // root only
+        assert!(entries[0].collapsed);
+    }
+
+    #[test]
+    fn build_tree_collapsed_dir() {
+        let files = vec![
+            make_entry("src/a.rs", FileStatus::Modified),
+            make_entry("src/b.rs", FileStatus::Modified),
+        ];
+        let mut collapsed = HashSet::new();
+        collapsed.insert("src".to_string());
+        let entries = build_tree(&files, &collapsed, &HashMap::new());
+        // Root + collapsed src dir (children hidden)
+        assert_eq!(entries.len(), 2);
+        assert!(entries[1].collapsed);
+    }
+
+    // --- Navigation ---
+
+    #[test]
+    fn navigation_bounds() {
+        let mut state = FileListState::new();
+        state.set_files(vec![
+            make_entry("a.txt", FileStatus::Added),
+            make_entry("b.txt", FileStatus::Added),
+        ]);
+        // Root + 2 files = 3 entries
+        assert_eq!(state.cursor, 0);
+        state.move_up(); // already at top
+        assert_eq!(state.cursor, 0);
+        state.go_bottom();
+        assert_eq!(state.cursor, 2);
+        state.move_down(); // already at bottom
+        assert_eq!(state.cursor, 2);
+    }
+
+    #[test]
+    fn navigation_fast_move() {
+        let mut state = FileListState::new();
+        state.set_files(vec![
+            make_entry("a.txt", FileStatus::Added),
+            make_entry("b.txt", FileStatus::Added),
+            make_entry("c.txt", FileStatus::Added),
+        ]);
+        // 4 entries (root + 3 files)
+        state.move_down_n(5); // clamped to last
+        assert_eq!(state.cursor, 3);
+        state.move_up_n(5); // clamped to first
+        assert_eq!(state.cursor, 0);
+    }
+
+    #[test]
+    fn collapse_expand() {
+        let mut state = FileListState::new();
+        state.set_files(vec![
+            make_entry("src/a.rs", FileStatus::Modified),
+            make_entry("src/b.rs", FileStatus::Modified),
+        ]);
+        // Root, src/, a.rs, b.rs = 4
+        assert_eq!(state.entries.len(), 4);
+
+        state.cursor = 1; // select src/
+        state.collapse();
+        assert_eq!(state.entries.len(), 2); // root + collapsed src
+
+        state.cursor = 1;
+        state.expand();
+        assert_eq!(state.entries.len(), 4); // expanded again
+    }
+}
+
 fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'static> {
     let mut spans = vec![];
 

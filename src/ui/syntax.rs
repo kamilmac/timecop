@@ -125,6 +125,49 @@ fn syntect_to_ratatui_color(color: syntect::highlighting::Color) -> Color {
     Color::Rgb(color.r, color.g, color.b)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn highlighter() -> Highlighter {
+        Highlighter::for_theme(ThemeMode::Dark)
+    }
+
+    #[test]
+    fn highlight_output_contains_no_newlines() {
+        let h = highlighter();
+        let content = "fn main() {\n    println!(\"hello\");\n}\n";
+        let lines = h.highlight_file(content, "test.rs");
+        for (i, line) in lines.iter().enumerate() {
+            for (text, _style) in line {
+                assert!(
+                    !text.contains('\n'),
+                    "line {} span {:?} contains newline",
+                    i,
+                    text
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn highlight_preserves_line_count() {
+        let h = highlighter();
+        let content = "a\nb\nc";
+        let lines = h.highlight_file(content, "test.txt");
+        assert_eq!(lines.len(), 3);
+    }
+
+    #[test]
+    fn highlight_reconstructs_original_text() {
+        let h = highlighter();
+        let content = "let x = 42;";
+        let lines = h.highlight_file(content, "test.rs");
+        let reconstructed: String = lines[0].iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(reconstructed, content);
+    }
+}
+
 /// Darken colors for light mode - convert bright colors to dark equivalents
 fn darken_for_light_mode(color: syntect::highlighting::Color) -> Color {
     // Convert to HSL-like adjustment: reduce lightness significantly

@@ -13,7 +13,9 @@ cargo run                # Run in current directory
 cargo run -- /path       # Run in specific directory
 ```
 
-No tests currently exist.
+```bash
+cargo test               # Run all tests
+```
 
 ## Code Style
 

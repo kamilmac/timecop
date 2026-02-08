@@ -114,3 +114,96 @@ impl TimelinePosition {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- FileStatus ---
+
+    #[test]
+    fn file_status_as_char() {
+        assert_eq!(FileStatus::Modified.as_char(), 'M');
+        assert_eq!(FileStatus::Added.as_char(), 'A');
+        assert_eq!(FileStatus::Deleted.as_char(), 'D');
+        assert_eq!(FileStatus::Renamed.as_char(), 'R');
+        assert_eq!(FileStatus::Unchanged.as_char(), ' ');
+    }
+
+    #[test]
+    fn file_status_display() {
+        assert_eq!(format!("{}", FileStatus::Modified), "M");
+        assert_eq!(format!("{}", FileStatus::Unchanged), " ");
+    }
+
+    // --- EntryType ---
+
+    #[test]
+    fn entry_type_is_ignored() {
+        assert!(!EntryType::Tracked.is_ignored());
+        assert!(EntryType::Ignored.is_ignored());
+        assert!(EntryType::IgnoredDir.is_ignored());
+    }
+
+    #[test]
+    fn entry_type_is_dir() {
+        assert!(!EntryType::Tracked.is_dir());
+        assert!(!EntryType::Ignored.is_dir());
+        assert!(EntryType::IgnoredDir.is_dir());
+    }
+
+    // --- TimelinePosition::next ---
+
+    #[test]
+    fn timeline_next_full_traversal() {
+        let pos = TimelinePosition::CommitDiff(3);
+        let pos = pos.next(); // CommitDiff(2)
+        assert_eq!(pos, TimelinePosition::CommitDiff(2));
+        let pos = pos.next(); // CommitDiff(1)
+        assert_eq!(pos, TimelinePosition::CommitDiff(1));
+        let pos = pos.next(); // Wip
+        assert_eq!(pos, TimelinePosition::Wip);
+        let pos = pos.next(); // FullDiff
+        assert_eq!(pos, TimelinePosition::FullDiff);
+        let pos = pos.next(); // Browse
+        assert_eq!(pos, TimelinePosition::Browse);
+        let pos = pos.next(); // stays Browse
+        assert_eq!(pos, TimelinePosition::Browse);
+    }
+
+    // --- TimelinePosition::prev ---
+
+    #[test]
+    fn timeline_prev_full_traversal() {
+        let pos = TimelinePosition::Browse;
+        let pos = pos.prev(3);
+        assert_eq!(pos, TimelinePosition::FullDiff);
+        let pos = pos.prev(3);
+        assert_eq!(pos, TimelinePosition::Wip);
+        let pos = pos.prev(3);
+        assert_eq!(pos, TimelinePosition::CommitDiff(1));
+        let pos = pos.prev(3);
+        assert_eq!(pos, TimelinePosition::CommitDiff(2));
+        let pos = pos.prev(3);
+        assert_eq!(pos, TimelinePosition::CommitDiff(3));
+        let pos = pos.prev(3); // capped at max_commits
+        assert_eq!(pos, TimelinePosition::CommitDiff(3));
+    }
+
+    #[test]
+    fn timeline_prev_no_commits() {
+        let pos = TimelinePosition::Wip.prev(0);
+        assert_eq!(pos, TimelinePosition::Wip); // can't go further
+    }
+
+    #[test]
+    fn timeline_prev_capped_at_16() {
+        let pos = TimelinePosition::CommitDiff(16).prev(100);
+        assert_eq!(pos, TimelinePosition::CommitDiff(16)); // 16 is hard max
+    }
+
+    #[test]
+    fn timeline_default_is_full_diff() {
+        assert_eq!(TimelinePosition::default(), TimelinePosition::FullDiff);
+    }
+}
