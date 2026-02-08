@@ -436,8 +436,8 @@ fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'sta
     let cursor = if selected { ">" } else { " " };
     spans.push(Span::raw(cursor.to_string()));
 
-    // Indent
-    let indent = "  ".repeat(entry.depth);
+    // Indent (1 space per level)
+    let indent = " ".repeat(entry.depth);
     spans.push(Span::raw(indent));
 
     // Directory prefix
@@ -448,11 +448,13 @@ fn render_entry(entry: &TreeEntry, selected: bool, colors: &Colors) -> Line<'sta
         spans.push(Span::raw("  ".to_string()));
     }
 
-    // Name (dimmed if ignored)
+    // Name (directories in header color, files in text color, ignored dimmed)
     let name_style = if selected {
         colors.style_selected()
     } else if entry.ignored {
         colors.style_muted() // Dim ignored files/folders
+    } else if entry.is_dir {
+        colors.style_header() // Directories in distinct color
     } else {
         Style::reset().fg(colors.text)
     };

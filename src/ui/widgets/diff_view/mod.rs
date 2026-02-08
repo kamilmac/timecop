@@ -70,6 +70,8 @@ pub struct DiffViewState {
     highlighted_left: std::collections::HashMap<usize, Vec<(String, Style)>>,
     /// Syntax-highlighted lines for diff mode (right side, indexed by line number)
     highlighted_right: std::collections::HashMap<usize, Vec<(String, Style)>>,
+    /// Max indent level to show in skeleton view (files mode), 0-10
+    pub max_indent_level: usize,
 }
 
 impl Default for DiffViewState {
@@ -86,6 +88,7 @@ impl Default for DiffViewState {
             current_file: String::new(),
             highlighted_left: std::collections::HashMap::new(),
             highlighted_right: std::collections::HashMap::new(),
+            max_indent_level: 1, // Default: show 0-1 indent levels
         }
     }
 }
@@ -196,7 +199,7 @@ impl DiffViewState {
                         is_header: false,
                     }]
                 } else {
-                    parse_file_content(content)
+                    parse_file_content(content, self.max_indent_level)
                 }
             }
             PreviewContent::FileDiff { content, .. } | PreviewContent::FolderDiff { content, .. } => {
@@ -398,6 +401,27 @@ impl DiffViewState {
         self.manual_mode = true;
     }
 
+    /// Decrease max indent level (show less code structure)
+    pub fn decrease_indent_level(&mut self) {
+        if self.max_indent_level > 0 {
+            self.max_indent_level -= 1;
+            self.parse_content();
+        }
+    }
+
+    /// Increase max indent level (show more code structure)
+    pub fn increase_indent_level(&mut self) {
+        if self.max_indent_level < 10 {
+            self.max_indent_level += 1;
+            self.parse_content();
+        }
+    }
+
+    /// Check if currently viewing file content (browse mode)
+    pub fn is_file_content_view(&self) -> bool {
+        matches!(self.content, PreviewContent::FileContent { .. })
+    }
+
     /// Auto-adjust view mode based on available width (unless user manually set it)
     pub fn auto_adjust_view_mode(&mut self, width: u16) {
         // Reset manual mode on significant resize
@@ -436,6 +460,17 @@ impl DiffViewState {
                 });
             }
             return Action::None;
+        }
+
+        // h/l adjust indent level in file content view (browse mode)
+        if self.is_file_content_view() {
+            if KeyInput::is_left(key) {
+                self.decrease_indent_level();
+                return Action::None;
+            } else if KeyInput::is_right(key) {
+                self.increase_indent_level();
+                return Action::None;
+            }
         }
 
         if KeyInput::is_down(key) {
@@ -495,9 +530,13 @@ impl<'a> StatefulWidget for DiffView<'a> {
         let border_style = self.colors.border_style(self.focused);
 
         // Build title with mode indicator and scroll info
-        let mode_indicator = match state.view_mode {
-            DiffViewMode::Split => "[split]",
-            DiffViewMode::Unified => "[unified]",
+        let mode_indicator = if state.is_file_content_view() {
+            format!("[depth:{}]", state.max_indent_level)
+        } else {
+            match state.view_mode {
+                DiffViewMode::Split => "[split]".to_string(),
+                DiffViewMode::Unified => "[unified]".to_string(),
+            }
         };
         let scroll_info = state.scroll_percent(area.height as usize);
         let title = if scroll_info.is_empty() {

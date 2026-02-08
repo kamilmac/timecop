@@ -221,19 +221,61 @@ pub fn truncate_or_pad(s: &str, width: usize) -> String {
 }
 
 /// Parse file content (not diff) into DiffLines for display
-pub fn parse_file_content(content: &str) -> Vec<DiffLine> {
+/// Shows only lines up to max_indent levels of indentation (skeleton view)
+pub fn parse_file_content(content: &str, max_indent: usize) -> Vec<DiffLine> {
     let mut lines = Vec::new();
 
-    for (i, line) in content.lines().enumerate() {
-        lines.push(DiffLine {
-            left_text: Some(line.to_string()),
-            right_text: None,
-            left_num: Some(i + 1),
-            right_num: None,
-            line_type: LineType::Context,
-            is_header: false,
-        });
+    // Detect indent unit from file (find smallest non-zero indent)
+    let indent_unit = detect_indent_unit(content);
+
+    for (line_num, line) in content.lines().enumerate() {
+        let indent_level = get_indent_level(line, indent_unit);
+
+        // Only show lines with indent level up to max_indent
+        if indent_level <= max_indent {
+            lines.push(DiffLine {
+                left_text: Some(line.to_string()),
+                right_text: None,
+                left_num: Some(line_num + 1), // Actual line number in file
+                right_num: None,
+                line_type: LineType::Context,
+                is_header: false,
+            });
+        }
     }
 
     lines
+}
+
+/// Detect the indentation unit used in a file (e.g., 2 spaces, 4 spaces, 1 tab)
+fn detect_indent_unit(content: &str) -> usize {
+    let mut min_indent = usize::MAX;
+
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let leading_spaces = line.len() - line.trim_start().len();
+        if leading_spaces > 0 && leading_spaces < min_indent {
+            min_indent = leading_spaces;
+        }
+    }
+
+    // Default to 4 if we couldn't detect
+    if min_indent == usize::MAX {
+        4
+    } else {
+        min_indent.max(1) // At least 1
+    }
+}
+
+/// Calculate indent level for a line based on indent unit
+fn get_indent_level(line: &str, indent_unit: usize) -> usize {
+    if line.trim().is_empty() {
+        return usize::MAX; // Skip empty lines
+    }
+
+    let leading_whitespace = line.len() - line.trim_start().len();
+    leading_whitespace / indent_unit
 }
