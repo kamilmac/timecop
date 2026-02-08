@@ -1,6 +1,8 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with this repository.
+
+For full architecture details, see [docs/design.md](docs/design.md).
 
 ## Build & Run
 
@@ -13,57 +15,84 @@ cargo run -- /path       # Run in specific directory
 
 No tests currently exist.
 
-## Code Style Preferences
+## Code Style
 
-- **Separation by feature, not type** - Group related functionality together rather than separating by file type (e.g., keep handlers with their views)
+- **Feature-based organization** - Group related functionality together (e.g., widgets in subdirectories with mod.rs, state, rendering)
 - **Tight, focused code** - Remove dead code aggressively, avoid over-abstraction
-- **Inline with existing patterns** - Follow conventions already established in the codebase
+- **Follow existing patterns** - Match conventions already in the codebase
 
-## Architecture
+## Architecture Overview
 
-TimeCop is a TUI code review app built with Rust/Ratatui for reviewing GitHub PRs.
+TimeCop is a TUI for code review built with Rust/Ratatui.
 
-### Core Concepts
+```
+src/
+├── main.rs           # Entry point, terminal setup, main loop
+├── app.rs            # Central state, event handling, rendering coordination
+├── event.rs          # EventHandler thread, KeyInput helpers
+├── async_loader.rs   # Background PR loading
+├── config.rs         # Colors, timing, layout config
+├── git/
+│   ├── client.rs     # Git operations (libgit2)
+│   └── types.rs      # TimelinePosition, FileStatus, StatusEntry
+├── github/
+│   └── mod.rs        # PR fetching via gh CLI
+└── ui/
+    ├── layout.rs     # Responsive layout
+    ├── syntax.rs     # Syntax highlighting (syntect)
+    └── widgets/
+        ├── file_list/    # Tree view
+        ├── diff_view/    # Diff preview + parser
+        ├── pr_list/      # PR list panel
+        ├── pr_details/   # PR details view
+        ├── help/         # Help modal
+        └── input/        # Input modal for reviews
+```
 
-- **App** (`src/app.rs`): Main application state and event handling. Manages focus, timeline position, and coordinates between widgets.
-- **Widgets** (`src/ui/widgets/`): Stateful UI components (FileList, DiffView, PrListPanel, HelpModal). Each implements Ratatui's `StatefulWidget`.
-- **Git Client** (`src/git/`): Native git operations via libgit2 (git2 crate). No shell commands.
-- **GitHub** (`src/github/`): PR info fetching via `gh` CLI.
+### Core Components
+
+- **App** (`app.rs`): Central coordinator. Manages focus, timeline position, widget states.
+- **Widgets** (`ui/widgets/`): Each widget has its own subdirectory with state and rendering.
+- **GitClient** (`git/client.rs`): Native git via libgit2. No shell commands.
+- **GitHubClient** (`github/mod.rs`): PR operations via `gh` CLI.
 
 ### Event Flow
 
 ```
-Terminal Event → EventHandler thread → App.handle_key()
-    → Update widget states → App.render() → Ratatui draws
+Terminal Event → EventHandler → App.handle_key() → Widget.handle_key()
+    → Action returned → App.dispatch() → State update → App.render()
 ```
 
-### Key Files
+## Timeline Navigation
 
-- `src/main.rs` - Entry point, terminal setup, main loop
-- `src/app.rs` - App struct, event handling, state management
-- `src/event.rs` - Event handler thread, key input helpers
-- `src/config.rs` - Colors, timing config
-- `src/git/client.rs` - GitClient with libgit2
-- `src/git/types.rs` - FileStatus, TimelinePosition, StatusEntry
-- `src/ui/widgets/file_list.rs` - Tree view with directory structure
-- `src/ui/widgets/diff_view.rs` - Side-by-side diff with inline comments
+Navigate PR history with `,` (older) and `.` (newer):
 
-### Timeline Navigation
+```
+T─I─M─E─C─O─P─○─○─○─●─[full]─[files]
+              -3-2-1 wip full  files
+```
 
-Use `,` and `.` to navigate through PR history:
-- **wip** - Only uncommitted changes (HEAD → working tree)
-- **current** (◆) - Full diff against base branch
-- **-1 to -6** - Individual commit diffs
+| Position | What it shows |
+|----------|---------------|
+| `-1` to `-16` | Single commit diffs |
+| `wip` | Uncommitted changes only |
+| `full` | All changes vs base branch (default) |
+| `files` | Browse all repository files |
 
-The Files panel title shows commit context when viewing historical commits.
+Implemented in `TimelinePosition` enum (`git/types.rs`) and `switch_timeline()` in `app.rs`.
 
-### Adding a Widget
+## Adding a Widget
 
-1. Create `src/ui/widgets/newwidget.rs` implementing `StatefulWidget`
-2. Add state struct with methods for navigation/updates
-3. Export from `src/ui/widgets/mod.rs`
-4. Add to App struct and render in `App.render()`
+1. Create directory `src/ui/widgets/newwidget/`
+2. Add `mod.rs` with widget struct implementing `StatefulWidget`
+3. Add state struct with `handle_key()` returning `Action`
+4. Export from `src/ui/widgets/mod.rs`
+5. Add state to `App` struct, render in `App.render()`
 
-### Key Bindings
+## Key Bindings
 
-Defined in `src/event.rs` as `KeyInput` helper methods. Add new bindings there and handle in `App.handle_key()`.
+Defined in `src/event.rs` as `KeyInput::is_*` methods. Handle in `App.handle_key()` for global keys, or in widget `handle_key()` for widget-specific keys.
+
+Global: `q` quit, `?` help, `r` refresh, `s` toggle view, `Tab` cycle panes, `,`/`.` timeline
+Navigation: `j`/`k` move, `J`/`K` fast, `g`/`G` top/bottom, `h`/`l` collapse/expand
+PR Review: `a` approve, `x` request changes, `c` comment
