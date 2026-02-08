@@ -221,8 +221,8 @@ pub fn truncate_or_pad(s: &str, width: usize) -> String {
 }
 
 /// Parse file content (not diff) into DiffLines for display
-/// Shows only lines with 0-2 levels of indentation (skeleton view)
-pub fn parse_file_content(content: &str) -> Vec<DiffLine> {
+/// Shows only lines up to max_indent levels of indentation (skeleton view)
+pub fn parse_file_content(content: &str, max_indent: usize) -> Vec<DiffLine> {
     let mut lines = Vec::new();
 
     // Detect indent unit from file (find smallest non-zero indent)
@@ -231,8 +231,8 @@ pub fn parse_file_content(content: &str) -> Vec<DiffLine> {
     for (line_num, line) in content.lines().enumerate() {
         let indent_level = get_indent_level(line, indent_unit);
 
-        // Only show lines with indent level 0, 1, or 2
-        if indent_level <= 2 {
+        // Only show lines with indent level up to max_indent
+        if indent_level <= max_indent {
             lines.push(DiffLine {
                 left_text: Some(line.to_string()),
                 right_text: None,

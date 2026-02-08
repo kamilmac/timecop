@@ -77,6 +77,7 @@ impl<'a> Widget for HelpModal<'a> {
             Line::from(""),
             Line::from(Span::styled("Diff View", self.colors.style_header())),
             format_binding("s", "Toggle split/unified view", self.colors),
+            format_binding("h/l", "Adjust skeleton depth (files mode)", self.colors),
             Line::from(""),
             Line::from(Span::styled("Actions", self.colors.style_header())),
             format_binding("o", "Open in $EDITOR (or PR in browser)", self.colors),
