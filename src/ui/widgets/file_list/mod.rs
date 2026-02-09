@@ -13,7 +13,7 @@ use crate::config::Colors;
 use crate::event::KeyInput;
 use crate::git::{FileStatus, StatusEntry};
 
-use super::Action;
+use super::{Action, ScrollState};
 
 /// Tree node for file display
 #[derive(Debug, Clone)]
@@ -35,11 +35,15 @@ pub struct TreeEntry {
 #[derive(Debug, Default)]
 pub struct FileListState {
     pub entries: Vec<TreeEntry>,
-    pub cursor: usize,
-    pub offset: usize,
+    pub scroll: ScrollState,
     pub collapsed: HashSet<String>,
     pub files: Vec<StatusEntry>,
     pub has_comments: HashMap<String, bool>,
+    // Persisted across timeline switches
+    selected_path: Option<String>,
+    browse_collapsed: HashSet<String>,
+    diff_collapsed: HashSet<String>,
+    browse_mode_initialized: bool,
 }
 
 impl FileListState {
@@ -63,52 +67,15 @@ impl FileListState {
 
     pub fn rebuild_tree(&mut self) {
         self.entries = build_tree(&self.files, &self.collapsed, &self.has_comments);
-        if self.cursor >= self.entries.len() && !self.entries.is_empty() {
-            self.cursor = self.entries.len() - 1;
-        }
+        self.scroll.set_len(self.entries.len());
     }
 
     pub fn selected(&self) -> Option<&TreeEntry> {
-        self.entries.get(self.cursor)
-    }
-
-    pub fn move_down(&mut self) {
-        if self.cursor < self.entries.len().saturating_sub(1) {
-            self.cursor += 1;
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn move_down_n(&mut self, n: usize) {
-        self.cursor = (self.cursor + n).min(self.entries.len().saturating_sub(1));
-    }
-
-    pub fn move_up_n(&mut self, n: usize) {
-        self.cursor = self.cursor.saturating_sub(n);
-    }
-
-    /// Click at a visible row (relative to inner area)
-    pub fn click_at(&mut self, visible_row: usize) {
-        let target = self.offset + visible_row;
-        if target < self.entries.len() {
-            self.cursor = target;
-        }
-    }
-
-    pub fn go_top(&mut self) {
-        self.cursor = 0;
-        self.offset = 0;
-    }
-
-    pub fn go_bottom(&mut self) {
-        self.cursor = self.entries.len().saturating_sub(1);
+        self.entries.get(self.scroll.cursor)
     }
 
     pub fn collapse(&mut self) {
-        if let Some(entry) = self.entries.get(self.cursor) {
+        if let Some(entry) = self.entries.get(self.scroll.cursor) {
             if entry.is_dir && !self.collapsed.contains(&entry.path) {
                 self.collapsed.insert(entry.path.clone());
                 self.rebuild_tree();
@@ -117,7 +84,7 @@ impl FileListState {
     }
 
     pub fn expand(&mut self) {
-        if let Some(entry) = self.entries.get(self.cursor) {
+        if let Some(entry) = self.entries.get(self.scroll.cursor) {
             if entry.is_dir && self.collapsed.contains(&entry.path) {
                 self.collapsed.remove(&entry.path);
                 self.rebuild_tree();
@@ -125,34 +92,121 @@ impl FileListState {
         }
     }
 
-    pub fn ensure_visible(&mut self, height: usize) {
-        let visible_height = height.saturating_sub(3);
-        if self.cursor < self.offset {
-            self.offset = self.cursor;
-        } else if self.cursor >= self.offset + visible_height {
-            self.offset = self.cursor.saturating_sub(visible_height) + 1;
+    /// Save the currently selected path for later restoration
+    pub fn save_selected_path(&mut self) {
+        if let Some(entry) = self.selected() {
+            self.selected_path = Some(entry.path.clone());
+        }
+    }
+
+    /// Save collapsed state for the mode being left
+    pub fn save_mode_state(&mut self, leaving_browse: bool) {
+        if leaving_browse {
+            self.browse_collapsed = std::mem::take(&mut self.collapsed);
+        } else {
+            self.diff_collapsed = std::mem::take(&mut self.collapsed);
+        }
+    }
+
+    /// Restore collapsed state for the mode being entered
+    pub fn restore_mode_state(&mut self, entering_browse: bool) {
+        self.collapsed = if entering_browse {
+            self.browse_collapsed.clone()
+        } else {
+            self.diff_collapsed.clone()
+        };
+    }
+
+    /// First-time browse mode setup: collapse all dirs, expand path to selected file
+    pub fn initialize_browse_mode(&mut self) {
+        if self.browse_mode_initialized {
+            return;
+        }
+
+        // Collect all directory paths
+        let mut all_dirs = HashSet::new();
+        for file in &self.files {
+            let path = std::path::Path::new(&file.path);
+            let mut current = std::path::PathBuf::new();
+            for component in path.components() {
+                current.push(component);
+                if current.to_string_lossy() != file.path {
+                    all_dirs.insert(current.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // Start with all collapsed
+        self.collapsed = all_dirs;
+
+        // Expand path to selected file
+        if let Some(ref path) = self.selected_path.clone() {
+            let file_path = std::path::Path::new(path);
+            let mut current = std::path::PathBuf::new();
+            for component in file_path.components() {
+                current.push(component);
+                let dir_str = current.to_string_lossy().to_string();
+                if dir_str != *path {
+                    self.collapsed.remove(&dir_str);
+                }
+            }
+        }
+
+        self.rebuild_tree();
+        self.browse_mode_initialized = true;
+    }
+
+    /// Select a path in the file list, or the closest visible parent
+    pub fn select_path_or_parent(&mut self, path: &str) {
+        // Try exact match first
+        if let Some(idx) = self.entries.iter().position(|e| e.path == path) {
+            self.scroll.cursor = idx;
+            return;
+        }
+
+        // Walk up path to find closest visible parent
+        let file_path = std::path::Path::new(path);
+        let mut components: Vec<_> = file_path.components().collect();
+        while !components.is_empty() {
+            components.pop();
+            if components.is_empty() {
+                break;
+            }
+            let parent: std::path::PathBuf = components.iter().collect();
+            let parent_str = parent.to_string_lossy();
+            if let Some(idx) = self.entries.iter().position(|e| e.path == parent_str) {
+                self.scroll.cursor = idx;
+                return;
+            }
+        }
+    }
+
+    /// Restore selection to the saved path (or closest parent)
+    pub fn restore_selection(&mut self) {
+        if let Some(ref path) = self.selected_path.clone() {
+            self.select_path_or_parent(path);
         }
     }
 
     /// Handle key input, return action for App to dispatch
     pub fn handle_key(&mut self, key: &KeyEvent) -> Action {
         if KeyInput::is_down(key) {
-            self.move_down();
+            self.scroll.move_down();
             Action::None
         } else if KeyInput::is_up(key) {
-            self.move_up();
+            self.scroll.move_up();
             Action::None
         } else if KeyInput::is_fast_down(key) {
-            self.move_down_n(5);
+            self.scroll.move_down_n(5);
             Action::None
         } else if KeyInput::is_fast_up(key) {
-            self.move_up_n(5);
+            self.scroll.move_up_n(5);
             Action::None
         } else if KeyInput::is_top(key) {
-            self.go_top();
+            self.scroll.go_top();
             Action::None
         } else if KeyInput::is_bottom(key) {
-            self.go_bottom();
+            self.scroll.go_bottom();
             Action::None
         } else if KeyInput::is_left(key) {
             self.collapse();
@@ -405,13 +459,13 @@ impl<'a> StatefulWidget for FileList<'a> {
         let inner = block.inner(area);
         block.render(area, buf);
 
-        state.ensure_visible(inner.height as usize);
+        state.scroll.ensure_visible(inner.height as usize);
 
         let visible_entries: Vec<_> = state
             .entries
             .iter()
             .enumerate()
-            .skip(state.offset)
+            .skip(state.scroll.offset)
             .take(inner.height as usize)
             .collect();
 
@@ -421,7 +475,7 @@ impl<'a> StatefulWidget for FileList<'a> {
                 break;
             }
 
-            let is_selected = idx == state.cursor;
+            let is_selected = idx == state.scroll.cursor;
             let line = render_entry(entry, is_selected, self.colors);
 
             buf.set_line(inner.x, y, &line, inner.width);
@@ -529,13 +583,13 @@ mod tests {
             make_entry("b.txt", FileStatus::Added),
         ]);
         // Root + 2 files = 3 entries
-        assert_eq!(state.cursor, 0);
-        state.move_up(); // already at top
-        assert_eq!(state.cursor, 0);
-        state.go_bottom();
-        assert_eq!(state.cursor, 2);
-        state.move_down(); // already at bottom
-        assert_eq!(state.cursor, 2);
+        assert_eq!(state.scroll.cursor, 0);
+        state.scroll.move_up(); // already at top
+        assert_eq!(state.scroll.cursor, 0);
+        state.scroll.go_bottom();
+        assert_eq!(state.scroll.cursor, 2);
+        state.scroll.move_down(); // already at bottom
+        assert_eq!(state.scroll.cursor, 2);
     }
 
     #[test]
@@ -547,10 +601,10 @@ mod tests {
             make_entry("c.txt", FileStatus::Added),
         ]);
         // 4 entries (root + 3 files)
-        state.move_down_n(5); // clamped to last
-        assert_eq!(state.cursor, 3);
-        state.move_up_n(5); // clamped to first
-        assert_eq!(state.cursor, 0);
+        state.scroll.move_down_n(5); // clamped to last
+        assert_eq!(state.scroll.cursor, 3);
+        state.scroll.move_up_n(5); // clamped to first
+        assert_eq!(state.scroll.cursor, 0);
     }
 
     #[test]
@@ -563,11 +617,11 @@ mod tests {
         // Root, src/, a.rs, b.rs = 4
         assert_eq!(state.entries.len(), 4);
 
-        state.cursor = 1; // select src/
+        state.scroll.cursor = 1; // select src/
         state.collapse();
         assert_eq!(state.entries.len(), 2); // root + collapsed src
 
-        state.cursor = 1;
+        state.scroll.cursor = 1;
         state.expand();
         assert_eq!(state.entries.len(), 4); // expanded again
     }

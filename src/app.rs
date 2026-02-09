@@ -17,7 +17,6 @@ use crate::ui::{
     centered_rect, Action, AppLayout, DiffView, DiffViewState, FileList, FileListState, HelpModal,
     Highlighter, InputModal, InputModalState, InputResult, LayoutAreas, PrDetailsView,
     PrDetailsViewState, PrListPanel, PrListPanelState, PreviewContent, ReviewAction,
-    ReviewActionType,
 };
 
 /// Which window is focused
@@ -125,12 +124,6 @@ pub struct App {
     // Layout areas for mouse hit testing
     layout_areas: Option<LayoutAreas>,
 
-    // Global file selection (persists across timeline switches)
-    selected_path: Option<String>,
-    // Per-file line positions in diff view
-    file_line_positions: HashMap<String, usize>,
-    // True after first FILES mode setup (to preserve expand/collapse state on subsequent entries)
-    browse_mode_initialized: bool,
 }
 
 impl App {
@@ -171,9 +164,6 @@ impl App {
             highlighter,
             config,
             layout_areas: None,
-            selected_path: None,
-            file_line_positions: HashMap::new(),
-            browse_mode_initialized: false,
         };
 
         // Initialize PR list panel
@@ -191,6 +181,13 @@ impl App {
         let branch_changed = new_branch != self.branch;
         self.branch = new_branch;
 
+        // Re-detect and fetch base branch (keeps origin/main etc. up to date)
+        if branch_changed {
+            self.git.refresh_base_branch();
+        } else {
+            self.git.fetch_base_branch();
+        }
+
         // Update commit count for timeline
         self.commit_count = self.git.commit_count_since_base().unwrap_or(0);
 
@@ -200,12 +197,12 @@ impl App {
 
         // Auto-select first file if cursor is at root and there are files
         // (Skip root "./" entry at index 0, select first actual file at index 1+)
-        if self.file_list_state.cursor == 0 && self.file_list_state.entries.len() > 1 {
+        if self.file_list_state.scroll.cursor == 0 && self.file_list_state.entries.len() > 1 {
             // Find first non-directory entry, or first entry after root
             let first_file_idx = self.file_list_state.entries.iter()
                 .position(|e| !e.is_dir && !e.is_root)
                 .unwrap_or(1);
-            self.file_list_state.cursor = first_file_idx.min(self.file_list_state.entries.len() - 1);
+            self.file_list_state.scroll.cursor = first_file_idx.min(self.file_list_state.entries.len() - 1);
         }
 
         // Compute full diff stats on branch change or if not yet calculated
@@ -232,98 +229,31 @@ impl App {
         Ok(())
     }
 
-    /// Select a path in file list, or closest visible parent if path not found
-    fn select_path_or_parent(&mut self, path: &str) {
-        // Try exact match first
-        if let Some(idx) = self.file_list_state.entries.iter().position(|e| e.path == path) {
-            self.file_list_state.cursor = idx;
-            return;
-        }
-
-        // Walk up path to find closest visible parent
-        let file_path = std::path::Path::new(path);
-        let mut components: Vec<_> = file_path.components().collect();
-        while !components.is_empty() {
-            components.pop();
-            if components.is_empty() {
-                break;
-            }
-            let parent: std::path::PathBuf = components.iter().collect();
-            let parent_str = parent.to_string_lossy();
-            if let Some(idx) = self.file_list_state.entries.iter().position(|e| e.path == parent_str) {
-                self.file_list_state.cursor = idx;
-                return;
-            }
-        }
-        // No match found, keep current cursor or go to first entry
-    }
-
     /// Switch to a new timeline position, preserving view state
     fn switch_timeline(&mut self, new_position: TimelinePosition) -> Result<()> {
         if new_position == self.timeline_position {
             return Ok(());
         }
 
-        // Save current file's line position
-        if let Some(path) = self.diff_view_state.get_current_file() {
-            if self.diff_view_state.cursor > 0 {
-                self.file_line_positions.insert(path.to_string(), self.diff_view_state.cursor);
-            }
-        }
+        self.diff_view_state.save_line_position();
+        self.file_list_state.save_selected_path();
 
-        // Update selected_path from current selection
-        if let Some(entry) = self.file_list_state.selected() {
-            self.selected_path = Some(entry.path.clone());
-        }
+        let leaving_browse = matches!(self.timeline_position, TimelinePosition::Browse);
+        let entering_browse = matches!(new_position, TimelinePosition::Browse);
 
-        // Switch position
+        self.file_list_state.save_mode_state(leaving_browse);
+        self.file_list_state.restore_mode_state(entering_browse);
+
         self.timeline_position = new_position;
 
-        // Load files for new position (collapsed state is preserved globally)
         let files = self.git.status_at_position(self.timeline_position)?;
         self.file_list_state.set_files(files);
 
-        // First entry to Browse mode: collapse all except path to selected file
-        if matches!(new_position, TimelinePosition::Browse) && !self.browse_mode_initialized {
-            // Collect all directory paths
-            let mut all_dirs = std::collections::HashSet::new();
-            for file in &self.file_list_state.files {
-                let path = std::path::Path::new(&file.path);
-                let mut current = std::path::PathBuf::new();
-                for component in path.components() {
-                    current.push(component);
-                    if current.to_string_lossy() != file.path {
-                        all_dirs.insert(current.to_string_lossy().to_string());
-                    }
-                }
-            }
-
-            // Start with all collapsed
-            self.file_list_state.collapsed = all_dirs;
-
-            // Expand path to selected file
-            if let Some(ref path) = self.selected_path {
-                let file_path = std::path::Path::new(path);
-                let mut current = std::path::PathBuf::new();
-                for component in file_path.components() {
-                    current.push(component);
-                    let dir_str = current.to_string_lossy().to_string();
-                    if dir_str != *path {
-                        self.file_list_state.collapsed.remove(&dir_str);
-                    }
-                }
-            }
-
-            self.file_list_state.rebuild_tree();
-            self.browse_mode_initialized = true;
+        if entering_browse {
+            self.file_list_state.initialize_browse_mode();
         }
 
-        // Select the remembered path or closest parent
-        if let Some(ref path) = self.selected_path.clone() {
-            self.select_path_or_parent(path);
-        }
-
-        // Update preview with new diff
+        self.file_list_state.restore_selection();
         self.update_preview();
 
         Ok(())
@@ -591,7 +521,7 @@ impl App {
             }
             match window {
                 FocusedWindow::FileList => {
-                    self.file_list_state.click_at(row as usize);
+                    self.file_list_state.scroll.click_at(row as usize);
                     self.update_preview();
                 }
                 FocusedWindow::PrList => {
@@ -604,9 +534,9 @@ impl App {
                 }
                 FocusedWindow::Preview => {
                     if self.pr_details_view_state.pr.is_some() {
-                        self.pr_details_view_state.click_at(row as usize);
+                        self.pr_details_view_state.scroll.click_at(row as usize);
                     } else {
-                        self.diff_view_state.click_at(row as usize);
+                        self.diff_view_state.scroll.click_at(row as usize);
                     }
                 }
             }
@@ -616,11 +546,11 @@ impl App {
     fn handle_scroll(&mut self, down: bool) {
         match self.focused {
             FocusedWindow::FileList => {
-                if down { self.file_list_state.move_down_n(3) } else { self.file_list_state.move_up_n(3) }
+                if down { self.file_list_state.scroll.move_down_n(3) } else { self.file_list_state.scroll.move_up_n(3) }
                 self.update_preview();
             }
             FocusedWindow::PrList => {
-                if down { self.pr_list_panel_state.move_down() } else { self.pr_list_panel_state.move_up() }
+                if down { self.pr_list_panel_state.scroll.move_down() } else { self.pr_list_panel_state.scroll.move_up() }
                 if let Some(n) = self.pr_list_panel_state.selected_number() {
                     self.load_pr_details(n);
                     self.show_selected_pr_in_preview();
@@ -628,9 +558,9 @@ impl App {
             }
             FocusedWindow::Preview => {
                 if self.pr_details_view_state.pr.is_some() {
-                    if down { self.pr_details_view_state.move_down_n(3) } else { self.pr_details_view_state.move_up_n(3) }
+                    if down { self.pr_details_view_state.scroll.move_down_n(3) } else { self.pr_details_view_state.scroll.move_up_n(3) }
                 } else {
-                    if down { self.diff_view_state.move_down_n(3) } else { self.diff_view_state.move_up_n(3) }
+                    if down { self.diff_view_state.scroll.move_down_n(3) } else { self.diff_view_state.scroll.move_up_n(3) }
                 }
             }
         }
@@ -655,21 +585,7 @@ impl App {
                 self.checkout_pr(pr_number)?;
             }
 
-            Action::OpenReviewModal(review_type) => {
-                let review_action = match review_type {
-                    ReviewActionType::Approve { pr_number } => {
-                        ReviewAction::Approve { pr_number }
-                    }
-                    ReviewActionType::RequestChanges { pr_number } => {
-                        ReviewAction::RequestChanges { pr_number }
-                    }
-                    ReviewActionType::Comment { pr_number } => {
-                        ReviewAction::Comment { pr_number }
-                    }
-                    ReviewActionType::LineComment { pr_number, path, line } => {
-                        ReviewAction::LineComment { pr_number, path, line }
-                    }
-                };
+            Action::OpenReviewModal(review_action) => {
                 self.input_modal_state.show(review_action);
             }
         }
@@ -734,11 +650,7 @@ impl App {
         }
 
         // Save current file's line position before switching
-        if let Some(current_path) = self.diff_view_state.get_current_file() {
-            if self.diff_view_state.cursor > 0 {
-                self.file_line_positions.insert(current_path.to_string(), self.diff_view_state.cursor);
-            }
-        }
+        self.diff_view_state.save_line_position();
 
         let is_browse_mode = matches!(self.timeline_position, TimelinePosition::Browse);
 
@@ -771,7 +683,7 @@ impl App {
                     content: file_content,
                 };
                 self.diff_view_state.set_content_highlighted(content, &self.highlighter);
-                self.restore_file_line_position();
+                self.diff_view_state.restore_line_position();
                 return;
             } else {
                 // File selected - diff with syntax highlighting at timeline position
@@ -784,7 +696,7 @@ impl App {
                     content: diff,
                 };
                 self.diff_view_state.set_content_highlighted(content, &self.highlighter);
-                self.restore_file_line_position();
+                self.diff_view_state.restore_line_position();
                 return;
             }
         } else {
@@ -792,16 +704,6 @@ impl App {
         };
 
         self.diff_view_state.set_content(content);
-    }
-
-    /// Restore line position for current file from cache
-    fn restore_file_line_position(&mut self) {
-        if let Some(path) = self.diff_view_state.get_current_file() {
-            if let Some(&line) = self.file_line_positions.get(path) {
-                let max_line = self.diff_view_state.lines.len().saturating_sub(1);
-                self.diff_view_state.cursor = line.min(max_line);
-            }
-        }
     }
 
     fn yank_path(&self) {
@@ -874,7 +776,10 @@ impl App {
         }
 
         match self.github.checkout_pr(pr_number) {
-            Ok(()) => {
+            Ok(base_branch) => {
+                if !base_branch.is_empty() {
+                    self.git.set_base_branch(&base_branch);
+                }
                 self.toast = Some(Toast::success("Switched to PR branch"));
                 self.refresh()?;
             }

@@ -18,7 +18,7 @@ use parser::{
     extract_diff_sides, is_binary, parse_diff, parse_file_content,
     parse_hunk_header, truncate_or_pad, wrap_text, DiffLine, LineType,
 };
-use super::{Action, ReviewActionType};
+use super::{Action, ReviewAction, ScrollState};
 
 /// What to show in the diff view
 #[derive(Debug, Clone, Default)]
@@ -57,8 +57,7 @@ const RESIZE_THRESHOLD: u16 = 4;
 pub struct DiffViewState {
     pub content: PreviewContent,
     pub lines: Vec<DiffLine>,
-    pub cursor: usize,
-    pub offset: usize,
+    pub scroll: ScrollState,
     pub pr: Option<PrInfo>,
     pub view_mode: DiffViewMode,
     /// User manually set the view mode (don't auto-switch)
@@ -72,6 +71,8 @@ pub struct DiffViewState {
     highlighted_right: std::collections::HashMap<usize, Vec<(String, Style)>>,
     /// Max indent level to show in skeleton view (files mode), 0-10
     pub max_indent_level: usize,
+    /// Per-file line positions (persists across file switches)
+    file_line_positions: std::collections::HashMap<String, usize>,
 }
 
 impl Default for DiffViewState {
@@ -79,8 +80,7 @@ impl Default for DiffViewState {
         Self {
             content: PreviewContent::default(),
             lines: Vec::new(),
-            cursor: 0,
-            offset: 0,
+            scroll: ScrollState::new(),
             pr: None,
             view_mode: DiffViewMode::default(),
             manual_mode: false,
@@ -89,6 +89,7 @@ impl Default for DiffViewState {
             highlighted_left: std::collections::HashMap::new(),
             highlighted_right: std::collections::HashMap::new(),
             max_indent_level: 1, // Default: show 0-1 indent levels
+            file_line_positions: std::collections::HashMap::new(),
         }
     }
 }
@@ -174,8 +175,7 @@ impl DiffViewState {
         }
 
         self.content = content;
-        self.cursor = 0;
-        self.offset = 0;
+        self.scroll = ScrollState::new();
         self.parse_content();
     }
 
@@ -220,6 +220,7 @@ impl DiffViewState {
 
         // Inject inline comments if we have PR info
         self.lines = self.inject_comments(base_lines);
+        self.scroll.set_len(self.lines.len());
     }
 
     fn inject_comments(&self, lines: Vec<DiffLine>) -> Vec<DiffLine> {
@@ -306,54 +307,11 @@ impl DiffViewState {
         }
     }
 
-    pub fn move_down(&mut self) {
-        if self.cursor < self.lines.len().saturating_sub(1) {
-            self.cursor += 1;
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn move_down_n(&mut self, n: usize) {
-        self.cursor = (self.cursor + n).min(self.lines.len().saturating_sub(1));
-    }
-
-    pub fn move_up_n(&mut self, n: usize) {
-        self.cursor = self.cursor.saturating_sub(n);
-    }
-
-    /// Click at a visible row (relative to inner area)
-    pub fn click_at(&mut self, visible_row: usize) {
-        let target = self.offset + visible_row;
-        if target < self.lines.len() {
-            self.cursor = target;
-        }
-    }
-
-    pub fn go_top(&mut self) {
-        self.cursor = 0;
-        self.offset = 0;
-    }
-
-    pub fn go_bottom(&mut self) {
-        self.cursor = self.lines.len().saturating_sub(1);
-    }
-
-    pub fn page_down(&mut self, amount: usize) {
-        self.move_down_n(amount);
-    }
-
-    pub fn page_up(&mut self, amount: usize) {
-        self.move_up_n(amount);
-    }
-
     /// Get line number for current cursor position
     /// For diffs, always returns the new file line number (right side)
     /// For file content view, returns left_num
     pub fn get_current_line_number(&self) -> Option<usize> {
-        self.lines.get(self.cursor).and_then(|line| {
+        self.lines.get(self.scroll.cursor).and_then(|line| {
             // Prefer right_num (new file) for diffs
             // Only fall back to left_num for file content view (where right is None)
             line.right_num.or_else(|| {
@@ -375,21 +333,23 @@ impl DiffViewState {
         }
     }
 
-    pub fn ensure_visible(&mut self, height: usize) {
-        let visible_height = height.saturating_sub(1);
-        if self.cursor < self.offset {
-            self.offset = self.cursor;
-        } else if self.cursor >= self.offset + visible_height {
-            self.offset = self.cursor.saturating_sub(visible_height) + 1;
+    /// Save cursor position for the current file
+    pub fn save_line_position(&mut self) {
+        if let Some(path) = self.get_current_file() {
+            if self.scroll.cursor > 0 {
+                self.file_line_positions.insert(path.to_string(), self.scroll.cursor);
+            }
         }
     }
 
-    pub fn scroll_percent(&self, height: usize) -> String {
-        if self.lines.is_empty() || self.lines.len() <= height.saturating_sub(2) {
-            return String::new();
+    /// Restore cursor position for the current file from cache
+    pub fn restore_line_position(&mut self) {
+        if let Some(path) = self.get_current_file() {
+            if let Some(&line) = self.file_line_positions.get(path) {
+                let max_line = self.lines.len().saturating_sub(1);
+                self.scroll.cursor = line.min(max_line);
+            }
         }
-        let percent = (self.offset * 100) / self.lines.len().saturating_sub(height.saturating_sub(2)).max(1);
-        format!("{}%", percent.min(100))
     }
 
     /// Toggle between split and unified view modes (manual override)
@@ -453,7 +413,7 @@ impl DiffViewState {
                 self.get_current_file().map(|s| s.to_string()),
                 self.get_current_line_number(),
             ) {
-                return Action::OpenReviewModal(ReviewActionType::LineComment {
+                return Action::OpenReviewModal(ReviewAction::LineComment {
                     pr_number: pr_num,
                     path,
                     line: line as u32,
@@ -474,28 +434,28 @@ impl DiffViewState {
         }
 
         if KeyInput::is_down(key) {
-            self.move_down();
+            self.scroll.move_down();
             Action::None
         } else if KeyInput::is_up(key) {
-            self.move_up();
+            self.scroll.move_up();
             Action::None
         } else if KeyInput::is_fast_down(key) {
-            self.move_down_n(5);
+            self.scroll.move_down_n(5);
             Action::None
         } else if KeyInput::is_fast_up(key) {
-            self.move_up_n(5);
+            self.scroll.move_up_n(5);
             Action::None
         } else if KeyInput::is_page_down(key) {
-            self.page_down(20);
+            self.scroll.move_down_n(20);
             Action::None
         } else if KeyInput::is_page_up(key) {
-            self.page_up(20);
+            self.scroll.move_up_n(20);
             Action::None
         } else if KeyInput::is_top(key) {
-            self.go_top();
+            self.scroll.go_top();
             Action::None
         } else if KeyInput::is_bottom(key) {
-            self.go_bottom();
+            self.scroll.go_bottom();
             Action::None
         } else {
             Action::Ignored
@@ -538,7 +498,7 @@ impl<'a> StatefulWidget for DiffView<'a> {
                 DiffViewMode::Unified => "[unified]".to_string(),
             }
         };
-        let scroll_info = state.scroll_percent(area.height as usize);
+        let scroll_info = state.scroll.scroll_percent(area.height.saturating_sub(2) as usize);
         let title = if scroll_info.is_empty() {
             format!("{} {}", state.title(), mode_indicator)
         } else {
@@ -568,13 +528,13 @@ impl<'a> StatefulWidget for DiffView<'a> {
             return;
         }
 
-        state.ensure_visible(inner.height as usize);
+        state.scroll.ensure_visible(inner.height as usize);
 
         let visible_lines: Vec<_> = state
             .lines
             .iter()
             .enumerate()
-            .skip(state.offset)
+            .skip(state.scroll.offset)
             .take(inner.height as usize)
             .collect();
 
@@ -584,7 +544,7 @@ impl<'a> StatefulWidget for DiffView<'a> {
 
         for (i, (idx, diff_line)) in visible_lines.into_iter().enumerate() {
             let y = inner.y + i as u16;
-            let is_cursor = self.focused && idx == state.cursor;
+            let is_cursor = self.focused && idx == state.scroll.cursor;
 
             let line = if diff_line.is_header {
                 render_header_line(diff_line, is_cursor, self.colors)

@@ -8,38 +8,7 @@ use ratatui::{
 
 use crate::config::Colors;
 
-/// Type of review action being performed
-#[derive(Debug, Clone, PartialEq)]
-pub enum ReviewAction {
-    Approve { pr_number: u64 },
-    RequestChanges { pr_number: u64 },
-    Comment { pr_number: u64 },
-    LineComment { pr_number: u64, path: String, line: u32 },
-}
-
-impl ReviewAction {
-    pub fn title(&self) -> String {
-        match self {
-            Self::Approve { pr_number } => format!("Approve PR #{}", pr_number),
-            Self::RequestChanges { pr_number } => format!("Request Changes - PR #{}", pr_number),
-            Self::Comment { pr_number } => format!("Comment on PR #{}", pr_number),
-            Self::LineComment { pr_number, path, line } => {
-                format!("Comment on {}:{} - PR #{}", path, line, pr_number)
-            }
-        }
-    }
-
-    pub fn needs_body(&self) -> bool {
-        matches!(self, Self::RequestChanges { .. } | Self::Comment { .. } | Self::LineComment { .. })
-    }
-
-    pub fn confirmation_message(&self) -> Option<&str> {
-        match self {
-            Self::Approve { .. } => Some("Are you sure you want to approve this PR?"),
-            _ => None,
-        }
-    }
-}
+use super::ReviewAction;
 
 /// Input modal state
 #[derive(Debug, Default)]

@@ -16,7 +16,7 @@ use crate::config::Colors;
 use crate::event::KeyInput;
 use crate::github::PrInfo;
 
-use super::Action;
+use super::{Action, ScrollState};
 
 /// A parsed line ready for display
 #[derive(Debug, Clone)]
@@ -42,8 +42,7 @@ pub struct PrDetailsViewState {
     pub pr: Option<PrInfo>,
     pub loading_message: Option<String>,
     lines: Vec<DisplayLine>,
-    cursor: usize,
-    offset: usize,
+    pub scroll: ScrollState,
 }
 
 impl PrDetailsViewState {
@@ -54,8 +53,7 @@ impl PrDetailsViewState {
     pub fn set_pr(&mut self, pr: Option<PrInfo>) {
         self.pr = pr;
         self.loading_message = None;
-        self.cursor = 0;
-        self.offset = 0;
+        self.scroll = ScrollState::new();
         self.rebuild_lines();
     }
 
@@ -63,14 +61,14 @@ impl PrDetailsViewState {
         self.loading_message = Some(message);
         self.pr = None;
         self.lines.clear();
+        self.scroll.set_len(0);
     }
 
     pub fn clear(&mut self) {
         self.pr = None;
         self.loading_message = None;
         self.lines.clear();
-        self.cursor = 0;
-        self.offset = 0;
+        self.scroll = ScrollState::new();
     }
 
     fn rebuild_lines(&mut self) {
@@ -78,6 +76,7 @@ impl PrDetailsViewState {
             Some(pr) => parse_pr_details(pr),
             None => vec![],
         };
+        self.scroll.set_len(self.lines.len());
     }
 
     pub fn title(&self) -> String {
@@ -87,91 +86,31 @@ impl PrDetailsViewState {
         }
     }
 
-    pub fn move_down(&mut self) {
-        if self.cursor < self.lines.len().saturating_sub(1) {
-            self.cursor += 1;
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
-    }
-
-    pub fn move_down_n(&mut self, n: usize) {
-        self.cursor = (self.cursor + n).min(self.lines.len().saturating_sub(1));
-    }
-
-    pub fn move_up_n(&mut self, n: usize) {
-        self.cursor = self.cursor.saturating_sub(n);
-    }
-
-    /// Click at a visible row (relative to inner area)
-    pub fn click_at(&mut self, visible_row: usize) {
-        let target = self.offset + visible_row;
-        if target < self.lines.len() {
-            self.cursor = target;
-        }
-    }
-
-    pub fn go_top(&mut self) {
-        self.cursor = 0;
-        self.offset = 0;
-    }
-
-    pub fn go_bottom(&mut self) {
-        self.cursor = self.lines.len().saturating_sub(1);
-    }
-
-    pub fn page_down(&mut self, amount: usize) {
-        self.move_down_n(amount);
-    }
-
-    pub fn page_up(&mut self, amount: usize) {
-        self.move_up_n(amount);
-    }
-
-    pub fn ensure_visible(&mut self, height: usize) {
-        let visible_height = height.saturating_sub(1);
-        if self.cursor < self.offset {
-            self.offset = self.cursor;
-        } else if self.cursor >= self.offset + visible_height {
-            self.offset = self.cursor.saturating_sub(visible_height) + 1;
-        }
-    }
-
-    pub fn scroll_percent(&self, height: usize) -> String {
-        if self.lines.is_empty() || self.lines.len() <= height.saturating_sub(2) {
-            return String::new();
-        }
-        let percent = (self.offset * 100) / self.lines.len().saturating_sub(height.saturating_sub(2)).max(1);
-        format!("{}%", percent.min(100))
-    }
-
     /// Handle key input, return action for App to dispatch
     pub fn handle_key(&mut self, key: &KeyEvent) -> Action {
         if KeyInput::is_down(key) {
-            self.move_down();
+            self.scroll.move_down();
             Action::None
         } else if KeyInput::is_up(key) {
-            self.move_up();
+            self.scroll.move_up();
             Action::None
         } else if KeyInput::is_fast_down(key) {
-            self.move_down_n(5);
+            self.scroll.move_down_n(5);
             Action::None
         } else if KeyInput::is_fast_up(key) {
-            self.move_up_n(5);
+            self.scroll.move_up_n(5);
             Action::None
         } else if KeyInput::is_page_down(key) {
-            self.page_down(20);
+            self.scroll.move_down_n(20);
             Action::None
         } else if KeyInput::is_page_up(key) {
-            self.page_up(20);
+            self.scroll.move_up_n(20);
             Action::None
         } else if KeyInput::is_top(key) {
-            self.go_top();
+            self.scroll.go_top();
             Action::None
         } else if KeyInput::is_bottom(key) {
-            self.go_bottom();
+            self.scroll.go_bottom();
             Action::None
         } else {
             Action::Ignored
@@ -205,7 +144,7 @@ impl<'a> StatefulWidget for PrDetailsView<'a> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let border_style = self.colors.border_style(self.focused);
 
-        let scroll_info = state.scroll_percent(area.height as usize);
+        let scroll_info = state.scroll.scroll_percent(area.height.saturating_sub(2) as usize);
         let title = if scroll_info.is_empty() {
             state.title()
         } else {
@@ -235,19 +174,19 @@ impl<'a> StatefulWidget for PrDetailsView<'a> {
             return;
         }
 
-        state.ensure_visible(inner.height as usize);
+        state.scroll.ensure_visible(inner.height as usize);
 
         let visible_lines: Vec<_> = state
             .lines
             .iter()
             .enumerate()
-            .skip(state.offset)
+            .skip(state.scroll.offset)
             .take(inner.height as usize)
             .collect();
 
         for (i, (idx, line)) in visible_lines.into_iter().enumerate() {
             let y = inner.y + i as u16;
-            let is_cursor = self.focused && idx == state.cursor;
+            let is_cursor = self.focused && idx == state.scroll.cursor;
 
             let rendered = render_line(line, is_cursor, self.colors);
             buf.set_line(inner.x, y, &rendered, inner.width);

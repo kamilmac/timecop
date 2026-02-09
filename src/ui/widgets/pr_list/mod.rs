@@ -11,14 +11,13 @@ use crate::config::Colors;
 use crate::event::KeyInput;
 use crate::github::PrSummary;
 
-use super::{Action, ReviewActionType};
+use super::{Action, ReviewAction, ScrollState};
 
 /// PR list panel widget state
 #[derive(Debug, Default)]
 pub struct PrListPanelState {
     pub prs: Vec<PrSummary>,
-    pub cursor: usize,
-    pub offset: usize,
+    pub scroll: ScrollState,
     pub loading: bool,
     pub current_branch: String,
     pub gh_available: bool,
@@ -43,12 +42,11 @@ impl PrListPanelState {
     pub fn set_prs(&mut self, prs: Vec<PrSummary>) {
         self.prs = prs;
         self.loading = false;
+        self.scroll.set_len(self.prs.len());
 
         // Try to select the PR for current branch
         if let Some(idx) = self.prs.iter().position(|pr| pr.branch == self.current_branch) {
-            self.cursor = idx;
-        } else if self.cursor >= self.prs.len() && !self.prs.is_empty() {
-            self.cursor = 0;
+            self.scroll.cursor = idx;
         }
     }
 
@@ -57,44 +55,26 @@ impl PrListPanelState {
 
         // Auto-select current branch's PR if available
         if let Some(idx) = self.prs.iter().position(|pr| pr.branch == self.current_branch) {
-            self.cursor = idx;
+            self.scroll.cursor = idx;
         }
-    }
-
-    pub fn move_down(&mut self) {
-        if self.cursor < self.prs.len().saturating_sub(1) {
-            self.cursor += 1;
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        self.cursor = self.cursor.saturating_sub(1);
     }
 
     /// Click at a visible row (relative to inner area). Returns true if selection changed.
     pub fn click_at(&mut self, visible_row: usize) -> bool {
-        let target = self.offset + visible_row;
-        if target < self.prs.len() && target != self.cursor {
-            self.cursor = target;
+        let target = self.scroll.offset + visible_row;
+        if target < self.prs.len() && target != self.scroll.cursor {
+            self.scroll.cursor = target;
             return true;
         }
         false
     }
 
     pub fn selected(&self) -> Option<&PrSummary> {
-        self.prs.get(self.cursor)
+        self.prs.get(self.scroll.cursor)
     }
 
     pub fn selected_number(&self) -> Option<u64> {
         self.selected().map(|pr| pr.number)
-    }
-
-    fn ensure_visible(&mut self, visible_count: usize) {
-        if self.cursor < self.offset {
-            self.offset = self.cursor;
-        } else if self.cursor >= self.offset + visible_count {
-            self.offset = self.cursor.saturating_sub(visible_count) + 1;
-        }
     }
 
     /// Handle key input, return action for App to dispatch
@@ -107,7 +87,7 @@ impl PrListPanelState {
         // Review actions
         if KeyInput::is_approve(key) {
             if let Some(pr) = self.selected() {
-                return Action::OpenReviewModal(ReviewActionType::Approve {
+                return Action::OpenReviewModal(ReviewAction::Approve {
                     pr_number: pr.number,
                 });
             }
@@ -116,7 +96,7 @@ impl PrListPanelState {
 
         if KeyInput::is_request_changes(key) {
             if let Some(pr) = self.selected() {
-                return Action::OpenReviewModal(ReviewActionType::RequestChanges {
+                return Action::OpenReviewModal(ReviewAction::RequestChanges {
                     pr_number: pr.number,
                 });
             }
@@ -125,7 +105,7 @@ impl PrListPanelState {
 
         if KeyInput::is_comment(key) {
             if let Some(pr) = self.selected() {
-                return Action::OpenReviewModal(ReviewActionType::Comment {
+                return Action::OpenReviewModal(ReviewAction::Comment {
                     pr_number: pr.number,
                 });
             }
@@ -133,7 +113,7 @@ impl PrListPanelState {
         }
 
         if KeyInput::is_down(key) {
-            self.move_down();
+            self.scroll.move_down();
             if let Some(pr) = self.selected() {
                 return Action::PrSelected(pr.number);
             }
@@ -141,7 +121,7 @@ impl PrListPanelState {
         }
 
         if KeyInput::is_up(key) {
-            self.move_up();
+            self.scroll.move_up();
             if let Some(pr) = self.selected() {
                 return Action::PrSelected(pr.number);
             }
@@ -230,18 +210,18 @@ impl<'a> StatefulWidget for PrListPanel<'a> {
         }
 
         let visible_count = inner.height as usize;
-        state.ensure_visible(visible_count);
+        state.scroll.ensure_visible(visible_count);
 
         for (i, pr) in state
             .prs
             .iter()
-            .skip(state.offset)
+            .skip(state.scroll.offset)
             .take(visible_count)
             .enumerate()
         {
             let y = inner.y + i as u16;
-            let idx = state.offset + i;
-            let is_selected = self.focused && idx == state.cursor;
+            let idx = state.scroll.offset + i;
+            let is_selected = self.focused && idx == state.scroll.cursor;
             let is_current_branch = pr.branch == state.current_branch;
 
             let line = render_pr_line(pr, is_selected, is_current_branch, self.colors, inner.width as usize);
