@@ -774,19 +774,26 @@ impl App {
         };
 
         let path = &entry.path;
-        if path.ends_with(".md") || path.ends_with(".markdown") {
-            self.open_markdown_preview(path);
-        }
-    }
-
-    fn open_markdown_preview(&self, path: &str) {
         let full_path = self.git.path().join(path);
+
+        // read_to_string fails on binary files (invalid UTF-8), which is what we want
         let content = match std::fs::read_to_string(&full_path) {
             Ok(c) => c,
             Err(_) => return,
         };
 
-        let compressed = lz_str::compress_to_encoded_uri_component(&content);
+        let is_markdown = path.ends_with(".md") || path.ends_with(".markdown");
+        let body = if is_markdown {
+            content
+        } else {
+            let ext = std::path::Path::new(path)
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            format!("```{}\n{}\n```", ext, content)
+        };
+
+        let compressed = lz_str::compress_to_encoded_uri_component(&body);
         let url = format!("https://kamilmac.github.io/mdash/#{}", compressed);
 
         let _ = std::process::Command::new("open")
