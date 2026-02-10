@@ -27,6 +27,7 @@ pub struct Review {
 
 #[derive(Debug, Clone)]
 pub struct Comment {
+    pub id: u64,
     pub author: String,
     pub body: String,
     pub line: Option<u32>,
@@ -117,6 +118,7 @@ impl GitHubClient {
 
         #[derive(Deserialize)]
         struct CommentData {
+            id: u64,
             user: UserData,
             body: String,
             path: Option<String>,
@@ -138,6 +140,7 @@ impl GitHubClient {
 
         for c in comments {
             let comment = Comment {
+                id: c.id,
                 author: c.user.login,
                 body: c.body,
                 line: c.line,
@@ -402,6 +405,28 @@ impl GitHubClient {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!("Failed to comment: {}", stderr);
+        }
+        Ok(())
+    }
+
+    /// Reply to an existing PR review comment thread
+    pub fn reply_to_comment(&self, pr_number: u64, comment_id: u64, body: &str) -> Result<()> {
+        let output = Command::new("gh")
+            .args([
+                "api",
+                "--method", "POST",
+                &format!("repos/{{owner}}/{{repo}}/pulls/{}/comments/{}/replies", pr_number, comment_id),
+                "-f", &format!("body={}", body),
+            ])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .output()
+            .context("Failed to reply to comment")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Failed to reply to comment: {}", stderr);
         }
         Ok(())
     }

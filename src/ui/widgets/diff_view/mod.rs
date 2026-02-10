@@ -197,6 +197,7 @@ impl DiffViewState {
                         right_num: None,
                         line_type: LineType::Info,
                         is_header: false,
+                        comment_id: None,
                     }]
                 } else {
                     parse_file_content(content, self.max_indent_level)
@@ -211,6 +212,7 @@ impl DiffViewState {
                         right_num: None,
                         line_type: LineType::Info,
                         is_header: false,
+                        comment_id: None,
                     }]
                 } else {
                     parse_diff(content)
@@ -269,7 +271,7 @@ impl DiffViewState {
 
                 if matches {
                     rendered_comments.insert(idx);
-                    // Add comment header
+                    // Add comment header with comment_id for reply targeting
                     result.push(DiffLine {
                         left_text: Some(format!("💬 {}", comment.author)),
                         right_text: None,
@@ -277,8 +279,9 @@ impl DiffViewState {
                         right_num: None,
                         line_type: LineType::Comment,
                         is_header: true,
+                        comment_id: Some(comment.id),
                     });
-                    // Add comment body lines with wrapping
+                    // Add comment body lines with wrapping (same comment_id for all lines)
                     for body_line in comment.body.lines() {
                         for wrapped in wrap_text(body_line, wrap_width) {
                             result.push(DiffLine {
@@ -288,6 +291,7 @@ impl DiffViewState {
                                 right_num: None,
                                 line_type: LineType::Comment,
                                 is_header: true,
+                                comment_id: Some(comment.id),
                             });
                         }
                     }
@@ -403,21 +407,55 @@ impl DiffViewState {
         };
     }
 
+    /// Get the comment_id and author if the cursor is on a comment line
+    fn get_comment_at_cursor(&self) -> Option<(u64, String)> {
+        let line = self.lines.get(self.scroll.cursor)?;
+        if line.comment_id.is_some() {
+            let comment_id = line.comment_id.unwrap();
+            // Extract author from the header line: scan up to find "💬 author"
+            for i in (0..=self.scroll.cursor).rev() {
+                if let Some(l) = self.lines.get(i) {
+                    if let Some(ref text) = l.left_text {
+                        if let Some(author) = text.strip_prefix("💬 ") {
+                            return Some((comment_id, author.to_string()));
+                        }
+                    }
+                    // Stop scanning if we left the comment block
+                    if l.comment_id != Some(comment_id) {
+                        break;
+                    }
+                }
+            }
+            return Some((comment_id, String::new()));
+        }
+        None
+    }
+
     /// Handle key input, return action for App to dispatch
     /// pr_number is needed for line comments
     pub fn handle_key(&mut self, key: &KeyEvent, pr_number: Option<u64>) -> Action {
-        // Line comment
+        // Line comment / reply to comment
         if KeyInput::is_comment(key) {
-            if let (Some(pr_num), Some(path), Some(line)) = (
-                pr_number,
-                self.get_current_file().map(|s| s.to_string()),
-                self.get_current_line_number(),
-            ) {
-                return Action::OpenReviewModal(ReviewAction::LineComment {
-                    pr_number: pr_num,
-                    path,
-                    line: line as u32,
-                });
+            if let Some(pr_num) = pr_number {
+                // Check if cursor is on a comment line — reply to that comment
+                if let Some((comment_id, author)) = self.get_comment_at_cursor() {
+                    return Action::OpenReviewModal(ReviewAction::ReplyToComment {
+                        pr_number: pr_num,
+                        comment_id,
+                        author,
+                    });
+                }
+                // Otherwise, new line comment on the current diff line
+                if let (Some(path), Some(line)) = (
+                    self.get_current_file().map(|s| s.to_string()),
+                    self.get_current_line_number(),
+                ) {
+                    return Action::OpenReviewModal(ReviewAction::LineComment {
+                        pr_number: pr_num,
+                        path,
+                        line: line as u32,
+                    });
+                }
             }
             return Action::None;
         }

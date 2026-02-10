@@ -859,6 +859,9 @@ impl App {
             ReviewAction::LineComment { pr_number, path, line } => {
                 self.github.add_line_comment(*pr_number, path, *line, &body)
             }
+            ReviewAction::ReplyToComment { pr_number, comment_id, .. } => {
+                self.github.reply_to_comment(*pr_number, *comment_id, &body)
+            }
         };
 
         match result {
@@ -871,6 +874,7 @@ impl App {
                     ReviewAction::RequestChanges { .. } => "Changes requested",
                     ReviewAction::Comment { .. } => "Comment posted",
                     ReviewAction::LineComment { .. } => "Line comment added",
+                    ReviewAction::ReplyToComment { .. } => "Reply posted",
                 };
                 self.toast = Some(Toast::success(success_msg));
 
