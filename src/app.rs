@@ -590,6 +590,12 @@ impl App {
                 self.checkout_pr(pr_number)?;
             }
 
+            Action::ExpandIgnoredDir(dir_path) => {
+                if let Ok(entries) = self.git.list_ignored_dir(&dir_path) {
+                    self.file_list_state.insert_ignored_dir_contents(&dir_path, entries);
+                }
+            }
+
             Action::OpenReviewModal(review_action) => {
                 self.input_modal_state.show(review_action);
             }

@@ -83,13 +83,31 @@ impl FileListState {
         }
     }
 
-    pub fn expand(&mut self) {
+    pub fn expand(&mut self) -> Action {
         if let Some(entry) = self.entries.get(self.scroll.cursor) {
             if entry.is_dir && self.collapsed.contains(&entry.path) {
+                // Check if this is an ignored dir that hasn't been loaded yet
+                if entry.ignored && !entry.children.iter().any(|c| self.files.iter().any(|f| f.path == *c)) {
+                    return Action::ExpandIgnoredDir(entry.path.clone());
+                }
                 self.collapsed.remove(&entry.path);
                 self.rebuild_tree();
             }
         }
+        Action::None
+    }
+
+    /// Merge new entries from an expanded ignored dir, remove the placeholder, and expand
+    pub fn insert_ignored_dir_contents(&mut self, dir_path: &str, new_entries: Vec<StatusEntry>) {
+        // Remove the IgnoredDir placeholder
+        self.files.retain(|f| f.path != dir_path);
+        // Add the new entries
+        self.files.extend(new_entries);
+        // Sort to maintain order
+        self.files.sort_by(|a, b| a.path.cmp(&b.path));
+        // Uncollapse and rebuild
+        self.collapsed.remove(dir_path);
+        self.rebuild_tree();
     }
 
     /// Save the currently selected path for later restoration
@@ -126,6 +144,11 @@ impl FileListState {
         // Collect all directory paths
         let mut all_dirs = HashSet::new();
         for file in &self.files {
+            // IgnoredDir entries are directories themselves
+            if file.entry_type.is_dir() {
+                all_dirs.insert(file.path.clone());
+                continue;
+            }
             let path = std::path::Path::new(&file.path);
             let mut current = std::path::PathBuf::new();
             for component in path.components() {
@@ -212,18 +235,17 @@ impl FileListState {
             self.collapse();
             Action::None
         } else if KeyInput::is_right(key) {
-            self.expand();
-            Action::None
+            self.expand()
         } else if KeyInput::is_enter(key) {
             // Enter on file -> select it, enter on dir -> expand/collapse
             if let Some(entry) = self.selected() {
                 if entry.is_dir {
                     if self.collapsed.contains(&entry.path) {
-                        self.expand();
+                        self.expand()
                     } else {
                         self.collapse();
+                        Action::None
                     }
-                    Action::None
                 } else {
                     Action::FileSelected(PathBuf::from(&entry.path))
                 }

@@ -57,6 +57,9 @@ pub enum Action {
     /// Checkout PR
     CheckoutPr(u64),
 
+    /// Expand an ignored directory (lazy load its contents)
+    ExpandIgnoredDir(String),
+
     // Review actions
     /// Open review modal
     OpenReviewModal(ReviewAction),
