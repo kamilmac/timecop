@@ -576,6 +576,15 @@ impl GitClient {
         Ok(entries)
     }
 
+    /// Walk an ignored directory and return its entries (for lazy expansion)
+    pub fn list_ignored_dir(&self, rel_dir: &str) -> Result<Vec<StatusEntry>> {
+        let abs_dir = self.path.join(rel_dir);
+        let mut entries = Vec::new();
+        self.walk_dir(&abs_dir, &mut entries, 0)?;
+        entries.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(entries)
+    }
+
     /// Recursively walk directory and collect files
     /// Max depth of 20 to prevent runaway recursion
     fn walk_dir(&self, dir: &Path, entries: &mut Vec<StatusEntry>, depth: usize) -> Result<()> {
