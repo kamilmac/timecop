@@ -12,6 +12,8 @@ pub struct DiffLine {
     pub right_num: Option<usize>,
     pub line_type: LineType,
     pub is_header: bool,
+    /// If this line is part of a comment, the GitHub comment ID for reply targeting
+    pub comment_id: Option<u64>,
 }
 
 /// Type of diff line for styling purposes
@@ -59,6 +61,7 @@ pub fn parse_diff(content: &str) -> Vec<DiffLine> {
                 right_num: None,
                 line_type: LineType::Header,
                 is_header: true,
+                comment_id: None,
             });
         } else if line.starts_with('+') {
             lines.push(DiffLine {
@@ -68,6 +71,7 @@ pub fn parse_diff(content: &str) -> Vec<DiffLine> {
                 right_num: Some(right_num),
                 line_type: LineType::Added,
                 is_header: false,
+                comment_id: None,
             });
             right_num += 1;
         } else if line.starts_with('-') {
@@ -78,6 +82,7 @@ pub fn parse_diff(content: &str) -> Vec<DiffLine> {
                 right_num: None,
                 line_type: LineType::Removed,
                 is_header: false,
+                comment_id: None,
             });
             left_num += 1;
         } else if line.starts_with(' ') {
@@ -88,6 +93,7 @@ pub fn parse_diff(content: &str) -> Vec<DiffLine> {
                 right_num: Some(right_num),
                 line_type: LineType::Context,
                 is_header: false,
+                comment_id: None,
             });
             left_num += 1;
             right_num += 1;
@@ -99,6 +105,7 @@ pub fn parse_diff(content: &str) -> Vec<DiffLine> {
                 right_num: None,
                 line_type: LineType::Context,
                 is_header: true,
+                comment_id: None,
             });
         }
     }
@@ -240,6 +247,7 @@ pub fn parse_file_content(content: &str, max_indent: usize) -> Vec<DiffLine> {
                 right_num: None,
                 line_type: LineType::Context,
                 is_header: false,
+                comment_id: None,
             });
         }
     }
