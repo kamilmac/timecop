@@ -29,10 +29,6 @@ pub enum PreviewContent {
         path: String,
         content: String,
     },
-    FolderDiff {
-        path: String,
-        content: String,
-    },
     /// File content for browse mode (not a diff)
     FileContent {
         path: String,
@@ -202,7 +198,7 @@ impl DiffViewState {
                     parse_file_content(content, self.max_indent_level)
                 }
             }
-            PreviewContent::FileDiff { content, .. } | PreviewContent::FolderDiff { content, .. } => {
+            PreviewContent::FileDiff { content, .. } => {
                 if is_binary(content) {
                     vec![DiffLine {
                         left_text: Some("Binary file".to_string()),
@@ -303,7 +299,6 @@ impl DiffViewState {
             PreviewContent::Empty => "Preview".to_string(),
             PreviewContent::FileDiff { path, .. } => path.clone(),
             PreviewContent::FileContent { path, .. } => path.clone(),
-            PreviewContent::FolderDiff { path, .. } => format!("{}/", path),
         }
     }
 

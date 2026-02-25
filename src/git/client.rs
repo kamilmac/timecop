@@ -10,6 +10,7 @@ pub struct GitClient {
     repo: Repository,
     path: PathBuf,
     base_branch: Option<String>,
+    cached_merge_base: Option<git2::Oid>,
 }
 
 impl GitClient {
@@ -22,6 +23,7 @@ impl GitClient {
             repo,
             path,
             base_branch: None,
+            cached_merge_base: None,
         };
         client.base_branch = client.detect_base_branch();
         client.fetch_base_branch();
@@ -47,13 +49,31 @@ impl GitClient {
         } else {
             self.base_branch = Some(branch.to_string());
         }
+        self.cached_merge_base = None;
         self.fetch_base_branch();
     }
 
     /// Re-detect the base branch (e.g. after switching branches)
     pub fn refresh_base_branch(&mut self) {
         self.base_branch = self.detect_base_branch();
+        self.cached_merge_base = None;
         self.fetch_base_branch();
+    }
+
+    /// Compute and cache the merge base OID so downstream calls don't repeat the graph walk
+    pub fn refresh_merge_base_cache(&mut self) {
+        let base = match &self.base_branch {
+            Some(b) => b.clone(),
+            None => return,
+        };
+        let oid = (|| -> Result<git2::Oid> {
+            let base_commit = self.resolve_commit(&base)?;
+            let head_commit = self.repo.head()?.peel_to_commit()?;
+            self.repo
+                .merge_base(head_commit.id(), base_commit.id())
+                .context("Failed to find merge-base")
+        })();
+        self.cached_merge_base = oid.ok();
     }
 
     /// Fetch the base branch from origin so diffs match GitHub's view
@@ -265,19 +285,6 @@ impl GitClient {
         Ok(result)
     }
 
-    /// Get combined diff for multiple files at a specific timeline position
-    pub fn diff_files_at_position(&self, paths: &[String], position: super::TimelinePosition) -> Result<String> {
-        let mut result = String::new();
-        for path in paths {
-            let diff = self.diff_at_position(path, position)?;
-            if !diff.is_empty() {
-                result.push_str(&diff);
-                result.push('\n');
-            }
-        }
-        Ok(result)
-    }
-
     fn diff_to_string(&self, diff: &git2::Diff) -> Result<String> {
         let mut result = String::new();
         diff.print(git2::DiffFormat::Patch, |delta, hunk, line| {
@@ -367,14 +374,18 @@ impl GitClient {
             .context("Failed to resolve commit")
     }
 
-    /// Find the merge-base (common ancestor) between HEAD and base branch
+    /// Find the merge-base (common ancestor) between HEAD and base branch.
+    /// Uses cached OID when available to avoid repeated graph walks.
     fn merge_base_commit(&self, base: &str) -> Result<git2::Commit<'_>> {
-        let base_commit = self.resolve_commit(base)?;
-        let head_commit = self.repo.head()?.peel_to_commit()?;
-
-        let merge_base_oid = self.repo
-            .merge_base(head_commit.id(), base_commit.id())
-            .context("Failed to find merge-base")?;
+        let merge_base_oid = if let Some(oid) = self.cached_merge_base {
+            oid
+        } else {
+            let base_commit = self.resolve_commit(base)?;
+            let head_commit = self.repo.head()?.peel_to_commit()?;
+            self.repo
+                .merge_base(head_commit.id(), base_commit.id())
+                .context("Failed to find merge-base")?
+        };
 
         self.repo
             .find_commit(merge_base_oid)

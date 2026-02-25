@@ -106,7 +106,22 @@ fn run_app<B: Backend + io::Write>(
                 app.handle_tick();
             }
             AppEvent::FileChanged => {
+                // Drain queued FileChanged events to coalesce rapid saves
+                let mut pending = Vec::new();
+                while let Some(evt) = events.try_next() {
+                    if !matches!(evt, AppEvent::FileChanged) {
+                        pending.push(evt);
+                    }
+                }
                 app.refresh()?;
+                for evt in pending {
+                    match evt {
+                        AppEvent::Key(key) => app.handle_key(key)?,
+                        AppEvent::Mouse(mouse) => app.handle_mouse(mouse)?,
+                        AppEvent::Tick => app.handle_tick(),
+                        AppEvent::FileChanged => {}
+                    }
+                }
             }
         }
 

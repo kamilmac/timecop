@@ -149,6 +149,11 @@ impl EventHandler {
         Ok(self.rx.recv()?)
     }
 
+    /// Try to get the next event without blocking (returns None if queue is empty)
+    pub fn try_next(&self) -> Option<AppEvent> {
+        self.rx.try_recv().ok()
+    }
+
     /// Pause event polling (for spawning external processes)
     pub fn pause(&self) {
         self.paused.store(true, Ordering::Relaxed);

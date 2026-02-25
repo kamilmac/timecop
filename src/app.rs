@@ -181,12 +181,13 @@ impl App {
         let branch_changed = new_branch != self.branch;
         self.branch = new_branch;
 
-        // Re-detect and fetch base branch (keeps origin/main etc. up to date)
+        // Re-detect and fetch base branch only on branch change
         if branch_changed {
             self.git.refresh_base_branch();
-        } else {
-            self.git.fetch_base_branch();
         }
+
+        // Cache merge base OID once per refresh so downstream calls reuse it
+        self.git.refresh_merge_base_cache();
 
         // Update commit count for timeline
         self.commit_count = self.git.commit_count_since_base().unwrap_or(0);
@@ -376,6 +377,7 @@ impl App {
         }
 
         if KeyInput::is_refresh(&key) {
+            self.git.fetch_base_branch();
             self.refresh()?;
             return Ok(());
         }
@@ -669,26 +671,14 @@ impl App {
             if entry.is_root {
                 PreviewContent::Empty
             } else if entry.is_dir {
-                if is_browse_mode {
-                    // In browse mode, directories don't have a combined view
-                    PreviewContent::Empty
-                } else {
-                    // Directory selected - combined diff at timeline position
-                    let diff = self
-                        .git
-                        .diff_files_at_position(&entry.children, self.timeline_position)
-                        .unwrap_or_default();
-                    PreviewContent::FolderDiff {
-                        path: entry.path.clone(),
-                        content: diff,
-                    }
-                }
+                PreviewContent::Empty
             } else if is_browse_mode {
                 // Browse mode - show file content
                 let file_content = self
                     .git
                     .diff_at_position(&entry.path, self.timeline_position)
                     .unwrap_or_default();
+                let file_content = truncate_large_content(file_content);
                 let content = PreviewContent::FileContent {
                     path: entry.path.clone(),
                     content: file_content,
@@ -702,6 +692,7 @@ impl App {
                     .git
                     .diff_at_position(&entry.path, self.timeline_position)
                     .unwrap_or_default();
+                let diff = truncate_large_content(diff);
                 let content = PreviewContent::FileDiff {
                     path: entry.path.clone(),
                     content: diff,
@@ -1127,6 +1118,25 @@ impl App {
             _ => None,
         }
     }
+}
+
+/// Truncate content that exceeds the max line limit to avoid slow rendering
+const MAX_PREVIEW_LINES: usize = 10_000;
+
+fn truncate_large_content(content: String) -> String {
+    let line_count = content.lines().count();
+    if line_count <= MAX_PREVIEW_LINES {
+        return content;
+    }
+    let truncated: String = content
+        .lines()
+        .take(MAX_PREVIEW_LINES)
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!(
+        "{}\n\n... truncated ({} lines total, showing first {})",
+        truncated, line_count, MAX_PREVIEW_LINES
+    )
 }
 
 /// Format large numbers with K/M suffixes
