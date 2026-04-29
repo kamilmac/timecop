@@ -1,5 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Span;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::Path;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::{FontStyle, Style as SynStyle, Theme, ThemeSet};
@@ -8,6 +10,13 @@ use syntect::parsing::{SyntaxReference, SyntaxSet};
 pub struct Highlighter {
     syntax_set: SyntaxSet,
     theme: Theme,
+    cache: RefCell<HashMap<CacheKey, Vec<Span<'static>>>>,
+}
+
+#[derive(Hash, Eq, PartialEq)]
+struct CacheKey {
+    ext: String,
+    text: String,
 }
 
 impl Highlighter {
@@ -26,14 +35,14 @@ impl Highlighter {
                     .cloned()
                     .expect("at least one theme")
             });
-        Self { syntax_set, theme }
+        Self {
+            syntax_set,
+            theme,
+            cache: RefCell::new(HashMap::new()),
+        }
     }
 
-    fn syntax_for(&self, path: &str) -> &SyntaxReference {
-        let ext = Path::new(path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+    fn syntax_for_ext(&self, ext: &str) -> &SyntaxReference {
         self.syntax_set
             .find_syntax_by_extension(ext)
             .unwrap_or_else(|| self.syntax_set.find_syntax_plain_text())
@@ -43,21 +52,37 @@ impl Highlighter {
         if text.is_empty() {
             return vec![Span::raw("")];
         }
-        let syntax = self.syntax_for(path);
+        let ext = Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
+        let key = CacheKey {
+            ext: ext.clone(),
+            text: text.to_string(),
+        };
+
+        if let Some(spans) = self.cache.borrow().get(&key) {
+            return spans.clone();
+        }
+
+        let syntax = self.syntax_for_ext(&ext);
         let mut h = HighlightLines::new(syntax, &self.theme);
         let with_newline = format!("{text}\n");
-        let ranges = match h.highlight_line(&with_newline, &self.syntax_set) {
-            Ok(r) => r,
-            Err(_) => return vec![Span::raw(text.to_string())],
+        let spans: Vec<Span<'static>> = match h.highlight_line(&with_newline, &self.syntax_set) {
+            Ok(ranges) => ranges
+                .into_iter()
+                .map(|(style, slice)| {
+                    let cleaned = slice.trim_end_matches('\n').to_string();
+                    Span::styled(cleaned, convert_style(style))
+                })
+                .filter(|s| !s.content.is_empty())
+                .collect(),
+            Err(_) => vec![Span::raw(text.to_string())],
         };
-        ranges
-            .into_iter()
-            .map(|(style, slice)| {
-                let cleaned = slice.trim_end_matches('\n').to_string();
-                Span::styled(cleaned, convert_style(style))
-            })
-            .filter(|s| !s.content.is_empty())
-            .collect()
+
+        self.cache.borrow_mut().insert(key, spans.clone());
+        spans
     }
 }
 
