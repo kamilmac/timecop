@@ -1,5 +1,7 @@
 # TimeCop
 
+<img src="screenshots/timecop.png" width="700" />
+
 > "Navigate commits like Van Damme navigates time. But sitting down."
 
 A terminal UI for reviewing GitHub PRs and local branches — built for the agent loop. Open a PR and edit it like you would on github.com. Open a branch and yank code straight to your clipboard for your coding agent.
