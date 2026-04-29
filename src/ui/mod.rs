@@ -1,6 +1,7 @@
 pub mod fold;
 pub mod help;
 pub mod input;
+pub mod items;
 pub mod render;
 pub mod scroll;
 pub mod status;
