@@ -6,9 +6,17 @@ use crate::ui::syntax::Highlighter;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone)]
+pub struct DraftComment {
+    pub file: String,
+    pub line: u32,
+    pub body: String,
+}
+
 pub struct State {
     pub session: Session,
     pub repo_path: PathBuf,
+    pub drafts: Vec<DraftComment>,
     pub scroll: ScrollState,
     pub fold: FoldState,
     pub thread_overrides: HashSet<usize>,
@@ -28,6 +36,7 @@ impl State {
         Self {
             session,
             repo_path,
+            drafts: Vec::new(),
             scroll: ScrollState::new(),
             fold: FoldState::new(&paths),
             thread_overrides: HashSet::new(),

@@ -11,6 +11,7 @@ pub enum Row {
     ThreadHeader { thread_idx: usize },
     ThreadComment { thread_idx: usize, comment_idx: usize },
     ThreadResolvedSummary { thread_idx: usize },
+    DraftMarker { draft_idx: usize },
     Blank,
 }
 
@@ -21,6 +22,7 @@ pub enum Anchor {
     Hunk(usize, usize),
     Line(usize, usize, usize),
     Thread(usize),
+    Draft(usize),
 }
 
 pub fn build(state: &State) -> Vec<Row> {
@@ -62,6 +64,7 @@ pub fn build(state: &State) -> Vec<Row> {
                 if let Some(new_no) = line.new_lineno {
                     if line.kind != LineKind::Removed {
                         append_threads_for(&mut rows, state, &file.path, new_no);
+                        append_drafts_for(&mut rows, state, &file.path, new_no);
                     }
                 }
             }
@@ -69,6 +72,14 @@ pub fn build(state: &State) -> Vec<Row> {
     }
 
     rows
+}
+
+fn append_drafts_for(rows: &mut Vec<Row>, state: &State, file: &str, line: u32) {
+    for (di, c) in state.drafts.iter().enumerate() {
+        if c.file == file && c.line == line {
+            rows.push(Row::DraftMarker { draft_idx: di });
+        }
+    }
 }
 
 fn append_threads_for(rows: &mut Vec<Row>, state: &State, file: &str, line: u32) {
@@ -112,7 +123,15 @@ pub fn anchor_of(row: &Row) -> Anchor {
         Row::ThreadHeader { thread_idx }
         | Row::ThreadComment { thread_idx, .. }
         | Row::ThreadResolvedSummary { thread_idx } => Anchor::Thread(*thread_idx),
+        Row::DraftMarker { draft_idx } => Anchor::Draft(*draft_idx),
         Row::Blank => Anchor::Description,
+    }
+}
+
+pub fn current_draft_idx(rows: &[Row], cursor: usize) -> Option<usize> {
+    match rows.get(cursor)? {
+        Row::DraftMarker { draft_idx } => Some(*draft_idx),
+        _ => None,
     }
 }
 

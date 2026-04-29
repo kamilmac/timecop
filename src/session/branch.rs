@@ -4,18 +4,34 @@ use anyhow::{Context, Result, anyhow};
 use git2::Repository;
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BranchView {
+    VsBase,
+    Uncommitted,
+}
+
 pub struct BranchSession {
     pub base_ref: String,
     pub head_ref: String,
     pub merge_base_short: String,
     pub diff: Diff,
+    pub is_current: bool,
+    pub view: BranchView,
 }
 
 pub fn open(repo_path: PathBuf, branch: Option<String>) -> Result<BranchSession> {
+    open_with_view(repo_path, branch, BranchView::VsBase)
+}
+
+pub fn open_with_view(
+    repo_path: PathBuf,
+    branch: Option<String>,
+    view: BranchView,
+) -> Result<BranchSession> {
     let repo = Repository::open(&repo_path).context("open repo")?;
 
     let current = current_branch(&repo)?;
-    let (head_ref, include_workdir) = match branch {
+    let (head_ref, is_current) = match branch {
         None => (current.clone(), true),
         Some(b) if b == current => (current.clone(), true),
         Some(b) => (b, false),
@@ -28,10 +44,10 @@ pub fn open(repo_path: PathBuf, branch: Option<String>) -> Result<BranchSession>
     let merge_base_oid = repo.merge_base(base_oid, head_oid)?;
     let merge_base_short = format!("{merge_base_oid}").chars().take(7).collect();
 
-    let diff = if include_workdir {
-        diff::compute::compute_workdir(&repo_path, &base_ref)?
-    } else {
-        diff::compute::compute(&repo_path, &base_ref, &head_ref)?
+    let diff = match view {
+        BranchView::VsBase if is_current => diff::compute::compute_workdir(&repo_path, &base_ref)?,
+        BranchView::VsBase => diff::compute::compute(&repo_path, &base_ref, &head_ref)?,
+        BranchView::Uncommitted => diff::compute::compute_workdir(&repo_path, "HEAD")?,
     };
 
     Ok(BranchSession {
@@ -39,6 +55,8 @@ pub fn open(repo_path: PathBuf, branch: Option<String>) -> Result<BranchSession>
         head_ref,
         merge_base_short,
         diff,
+        is_current,
+        view,
     })
 }
 

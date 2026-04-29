@@ -1,5 +1,6 @@
 use crate::app::state::State;
 use crate::session::Session;
+use crate::session::branch::BranchView;
 use crate::ui::theme;
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -14,10 +15,15 @@ pub fn render(state: &State, frame: &mut Frame, area: Rect) {
             spans.push(Span::raw(format!("PR #{} · ", p.number)));
             spans.push(Span::raw(format!("{} → {} · ", p.head_ref, p.base_ref)));
         }
-        Session::Branch(b) => {
-            spans.push(Span::raw(format!("{} → {} ", b.head_ref, b.base_ref)));
-            spans.push(Span::raw(format!("(merge-base {}) · ", b.merge_base_short)));
-        }
+        Session::Branch(b) => match b.view {
+            BranchView::VsBase => {
+                spans.push(Span::raw(format!("{} → {} ", b.head_ref, b.base_ref)));
+                spans.push(Span::raw(format!("(merge-base {}) · ", b.merge_base_short)));
+            }
+            BranchView::Uncommitted => {
+                spans.push(Span::raw(format!("{} · uncommitted · ", b.head_ref)));
+            }
+        },
     }
 
     let n_files = state.session.diff().files.len();

@@ -1,3 +1,4 @@
+use crate::app::state::DraftComment;
 use crate::diff::types::{Diff, File, LineKind};
 use crate::session::Thread;
 
@@ -11,6 +12,21 @@ pub fn format_anchor(diff: &Diff, file: &str, line: u32) -> String {
     };
     for excerpt in excerpt_around(f, line, 3) {
         out.push_str(&format!("> {excerpt}\n"));
+    }
+    out
+}
+
+pub fn format_draft(diff: &Diff, draft: &DraftComment) -> String {
+    let mut out = format_anchor(diff, &draft.file, draft.line);
+    out.push_str(&format!("\n{}\n", draft.body));
+    out
+}
+
+pub fn format_drafts(diff: &Diff, drafts: &[DraftComment]) -> String {
+    let mut out = String::new();
+    for d in drafts {
+        out.push_str(&format_draft(diff, d));
+        out.push('\n');
     }
     out
 }

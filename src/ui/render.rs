@@ -72,7 +72,19 @@ fn render_row(state: &State, row: &Row) -> Line<'static> {
             render_thread_comment(state, *thread_idx, *comment_idx)
         }
         Row::ThreadResolvedSummary { thread_idx } => render_thread_summary(state, *thread_idx),
+        Row::DraftMarker { draft_idx } => render_draft(state, *draft_idx),
     }
+}
+
+fn render_draft(state: &State, di: usize) -> Line<'static> {
+    let Some(c) = state.drafts.get(di) else {
+        return Line::from("");
+    };
+    Line::from(vec![
+        Span::raw("        ".to_string()),
+        Span::styled("┃ ".to_string(), theme::thread_bar()),
+        Span::styled(first_line_of(&c.body), theme::comment_body()),
+    ])
 }
 
 fn render_file_header(state: &State, fi: usize) -> Line<'static> {

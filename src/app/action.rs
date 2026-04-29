@@ -1,8 +1,9 @@
 use crate::app::format;
-use crate::app::state::State;
-use crate::session::{Session, Verdict};
+use crate::app::state::{DraftComment, State};
+use crate::session::branch::BranchView;
 use crate::session::branch as branch_session;
 use crate::session::pr as pr_session;
+use crate::session::{Session, Verdict};
 use crate::ui::input::{self, InputResult, InputState, InputTarget};
 use crate::ui::items::{self, Anchor};
 use anyhow::Result;
@@ -66,6 +67,7 @@ fn handle_main_key(state: &mut State, key: KeyEvent) -> Result<()> {
             let rows = items::build(state);
             state.scroll.jump_to(rows.len().saturating_sub(1), rows.len());
         }
+        (KeyCode::Char(','), _) => toggle_branch_view(state)?,
         (KeyCode::Char(' '), _) => toggle_fold_at_cursor(state),
         (KeyCode::Char('h'), false) => collapse_at_cursor(state),
         (KeyCode::Char('l'), false) => expand_at_cursor(state),
@@ -76,6 +78,8 @@ fn handle_main_key(state: &mut State, key: KeyEvent) -> Result<()> {
         (KeyCode::Char('r'), false) => refresh(state)?,
         (KeyCode::Char('+'), _) => react_at_cursor(state, "+1")?,
         (KeyCode::Char('y'), false) => yank_at_cursor(state)?,
+        (KeyCode::Char('Y'), _) => yank_all_drafts(state)?,
+        (KeyCode::Char('d'), false) => delete_draft_at_cursor(state),
         (KeyCode::Enter, _) => start_verdict(state),
         _ => {}
     }
@@ -123,6 +127,7 @@ fn toggle_fold_at_cursor(state: &mut State) {
         Anchor::Description => {
             state.fold.description_collapsed = !state.fold.description_collapsed;
         }
+        Anchor::Draft(_) => {}
     }
 }
 
@@ -155,6 +160,7 @@ fn collapse_at_cursor(state: &mut State) {
         Anchor::Description => {
             state.fold.description_collapsed = true;
         }
+        Anchor::Draft(_) => {}
     }
 }
 
@@ -179,6 +185,7 @@ fn expand_at_cursor(state: &mut State) {
         Anchor::Description => {
             state.fold.description_collapsed = false;
         }
+        Anchor::Draft(_) => {}
     }
 }
 
@@ -210,13 +217,12 @@ fn toggle_all_folds(state: &mut State) {
 }
 
 fn start_comment(state: &mut State) {
-    if !matches!(state.session, Session::Pr(_)) {
-        state.status_message = Some("branch mode is read-only — y to yank".to_string());
-        return;
-    }
     let rows = items::build(state);
 
     if let Some(ti) = items::current_thread_idx(&rows, state.scroll.cursor) {
+        if !matches!(state.session, Session::Pr(_)) {
+            return;
+        }
         let Some(overlay) = state.session.overlay() else { return };
         let Some(thread) = overlay.threads.get(ti) else { return };
         if thread.outdated {
@@ -229,10 +235,35 @@ fn start_comment(state: &mut State) {
         return;
     }
 
+    if !drafts_allowed(state) {
+        state.status_message = Some(
+            "comments only on PR or current branch (with workdir)".to_string(),
+        );
+        return;
+    }
+
     if let Some((file, line)) = items::current_diff_line(state, &rows, state.scroll.cursor) {
         state.input = Some(InputState::new(InputTarget::NewComment { file, line }));
     } else {
         state.status_message = Some("place cursor on a code line or thread".to_string());
+    }
+}
+
+fn drafts_allowed(state: &State) -> bool {
+    match &state.session {
+        Session::Pr(_) => true,
+        Session::Branch(b) => b.is_current,
+    }
+}
+
+fn delete_draft_at_cursor(state: &mut State) {
+    let rows = items::build(state);
+    let Some(di) = items::current_draft_idx(&rows, state.scroll.cursor) else {
+        return;
+    };
+    if di < state.drafts.len() {
+        state.drafts.remove(di);
+        state.status_message = Some("draft deleted".to_string());
     }
 }
 
@@ -295,6 +326,10 @@ fn queue_editor_open(state: &mut State) {
             .session
             .overlay()
             .and_then(|o| o.threads.get(ti).map(|t| (t.file.clone(), t.line))),
+        Some(Anchor::Draft(di)) => state
+            .drafts
+            .get(di)
+            .map(|d| (d.file.clone(), d.line)),
         _ => None,
     };
     state.pending_editor = target;
@@ -311,6 +346,10 @@ fn yank_at_cursor(state: &mut State) -> Result<()> {
             .overlay()
             .and_then(|o| o.threads.get(ti))
             .map(|t| format::format_thread(state.session.diff(), t)),
+        Anchor::Draft(di) => state
+            .drafts
+            .get(di)
+            .map(|d| format::format_draft(state.session.diff(), d)),
         Anchor::Line(fi, hi, li) => {
             let diff = state.session.diff();
             let f = diff.files.get(fi);
@@ -329,6 +368,22 @@ fn yank_at_cursor(state: &mut State) -> Result<()> {
     let mut clip = Clipboard::new()?;
     clip.set_text(format!("{}{payload}", yank_header(&state.session)))?;
     state.status_message = Some("copied to clipboard".to_string());
+    Ok(())
+}
+
+fn yank_all_drafts(state: &mut State) -> Result<()> {
+    if state.drafts.is_empty() {
+        state.status_message = Some("no drafts to yank".to_string());
+        return Ok(());
+    }
+    let payload = format::format_drafts(state.session.diff(), &state.drafts);
+    let mut clip = Clipboard::new()?;
+    clip.set_text(format!("{}{payload}", yank_header(&state.session)))?;
+    state.status_message = Some(format!(
+        "copied {} draft{} to clipboard",
+        state.drafts.len(),
+        if state.drafts.len() == 1 { "" } else { "s" }
+    ));
     Ok(())
 }
 
@@ -399,11 +454,41 @@ fn react_at_cursor(state: &mut State, content: &str) -> Result<()> {
     Ok(())
 }
 
+fn toggle_branch_view(state: &mut State) -> Result<()> {
+    let Session::Branch(b) = &state.session else {
+        state.status_message = Some("only in branch mode".to_string());
+        return Ok(());
+    };
+    let new_view = match b.view {
+        BranchView::VsBase => BranchView::Uncommitted,
+        BranchView::Uncommitted => BranchView::VsBase,
+    };
+    let head_ref = b.head_ref.clone();
+    let new_session = branch_session::open_with_view(
+        state.repo_path.clone(),
+        Some(head_ref),
+        new_view,
+    )?;
+    state.session = Session::Branch(new_session);
+    state.thread_overrides.clear();
+    state.drafts.clear();
+    let rows = items::build(state);
+    if state.scroll.cursor >= rows.len() {
+        state.scroll.cursor = rows.len().saturating_sub(1);
+    }
+    state.status_message = Some(match new_view {
+        BranchView::VsBase => "branch vs base".to_string(),
+        BranchView::Uncommitted => "uncommitted only".to_string(),
+    });
+    Ok(())
+}
+
 fn refresh(state: &mut State) -> Result<()> {
     let new_session = match &state.session {
-        Session::Branch(b) => Session::Branch(branch_session::open(
+        Session::Branch(b) => Session::Branch(branch_session::open_with_view(
             state.repo_path.clone(),
             Some(b.head_ref.clone()),
+            b.view,
         )?),
         Session::Pr(p) => Session::Pr(pr_session::open(p.number)?),
     };
@@ -450,45 +535,40 @@ fn submit_input(state: &mut State, target: InputTarget, body: String) -> Result<
     if body.is_empty() {
         return Ok(());
     }
-    let Session::Pr(_) = &state.session else {
-        return Ok(());
-    };
-
     match target {
-        InputTarget::NewComment { file, line } => {
-            let result = match &state.session {
-                Session::Pr(p) => pr_session::post_comment(p, &file, line, &body),
-                _ => unreachable!(),
-            };
-            match result {
-                Ok(()) => {
-                    refresh(state)?;
-                    state.status_message = Some("comment posted".to_string());
-                }
-                Err(e) => {
-                    state.status_message = Some(format!("post failed: {e}"));
+        InputTarget::NewComment { file, line } => match &state.session {
+            Session::Pr(p) => {
+                let result = pr_session::post_comment(p, &file, line, &body);
+                match result {
+                    Ok(()) => {
+                        refresh(state)?;
+                        state.status_message = Some("comment posted".to_string());
+                    }
+                    Err(e) => {
+                        state.status_message = Some(format!("post failed: {e}"));
+                    }
                 }
             }
-        }
+            Session::Branch(_) => {
+                state.drafts.push(DraftComment { file, line, body });
+                state.status_message = Some("draft saved".to_string());
+            }
+        },
         InputTarget::Reply { thread_id } => {
-            let root_id = match &state.session {
-                Session::Pr(p) => p
-                    .overlay
-                    .threads
-                    .iter()
-                    .find(|t| t.node_id == thread_id)
-                    .map(|t| t.root_comment_id),
-                _ => None,
+            let Session::Pr(p) = &state.session else {
+                return Ok(());
             };
-            let Some(rid) = root_id else {
+            let Some(rid) = p
+                .overlay
+                .threads
+                .iter()
+                .find(|t| t.node_id == thread_id)
+                .map(|t| t.root_comment_id)
+            else {
                 state.status_message = Some("reply target not found".to_string());
                 return Ok(());
             };
-            let result = match &state.session {
-                Session::Pr(p) => pr_session::post_reply(p, rid, &body),
-                _ => unreachable!(),
-            };
-            match result {
+            match pr_session::post_reply(p, rid, &body) {
                 Ok(()) => {
                     refresh(state)?;
                     state.status_message = Some("reply posted".to_string());
