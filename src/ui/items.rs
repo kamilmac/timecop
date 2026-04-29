@@ -11,7 +11,6 @@ pub enum Row {
     ThreadHeader { thread_idx: usize },
     ThreadComment { thread_idx: usize, comment_idx: usize },
     ThreadResolvedSummary { thread_idx: usize },
-    DraftMarker { draft_idx: usize },
     Blank,
 }
 
@@ -22,7 +21,6 @@ pub enum Anchor {
     Hunk(usize, usize),
     Line(usize, usize, usize),
     Thread(usize),
-    Draft(usize),
 }
 
 pub fn build(state: &State) -> Vec<Row> {
@@ -64,7 +62,6 @@ pub fn build(state: &State) -> Vec<Row> {
                 if let Some(new_no) = line.new_lineno {
                     if line.kind != LineKind::Removed {
                         append_threads_for(&mut rows, state, &file.path, new_no);
-                        append_drafts_for(&mut rows, state, &file.path, new_no);
                     }
                 }
             }
@@ -79,34 +76,29 @@ fn append_threads_for(rows: &mut Vec<Row>, state: &State, file: &str, line: u32)
         return;
     };
     for (ti, thread) in overlay.threads.iter().enumerate() {
-        if thread.file == file && thread.line == line && !thread.outdated {
-            if thread.resolved && !state.expanded_resolved.contains(&ti) {
-                rows.push(Row::ThreadResolvedSummary { thread_idx: ti });
-                continue;
-            }
-            rows.push(Row::ThreadHeader { thread_idx: ti });
-            for (ci, _c) in thread.comments.iter().enumerate() {
-                rows.push(Row::ThreadComment {
-                    thread_idx: ti,
-                    comment_idx: ci,
-                });
-            }
+        if thread.file != file || thread.line != line {
+            continue;
         }
-    }
-
-    for (ti, thread) in overlay.threads.iter().enumerate() {
-        if thread.file == file && thread.line == line && thread.outdated {
+        if is_thread_collapsed(state, ti, thread) {
             rows.push(Row::ThreadResolvedSummary { thread_idx: ti });
+            continue;
+        }
+        rows.push(Row::ThreadHeader { thread_idx: ti });
+        for (ci, _) in thread.comments.iter().enumerate() {
+            rows.push(Row::ThreadComment {
+                thread_idx: ti,
+                comment_idx: ci,
+            });
         }
     }
 }
 
-fn append_drafts_for(rows: &mut Vec<Row>, state: &State, file: &str, line: u32) {
-    for (di, c) in state.draft.new_comments.iter().enumerate() {
-        if c.file == file && c.line == line {
-            rows.push(Row::DraftMarker { draft_idx: di });
-        }
-    }
+pub fn is_thread_collapsed(
+    state: &State,
+    ti: usize,
+    _thread: &crate::session::Thread,
+) -> bool {
+    !state.thread_overrides.contains(&ti)
 }
 
 pub fn anchor_of(row: &Row) -> Anchor {
@@ -120,47 +112,12 @@ pub fn anchor_of(row: &Row) -> Anchor {
         Row::ThreadHeader { thread_idx }
         | Row::ThreadComment { thread_idx, .. }
         | Row::ThreadResolvedSummary { thread_idx } => Anchor::Thread(*thread_idx),
-        Row::DraftMarker { draft_idx } => Anchor::Draft(*draft_idx),
         Row::Blank => Anchor::Description,
     }
 }
 
 pub fn find_anchor_index(rows: &[Row], anchor: &Anchor) -> Option<usize> {
     rows.iter().position(|r| &anchor_of(r) == anchor)
-}
-
-pub fn next_index<F>(rows: &[Row], from: usize, pred: F) -> Option<usize>
-where
-    F: Fn(&Row) -> bool,
-{
-    rows.iter().enumerate().skip(from + 1).find(|(_, r)| pred(r)).map(|(i, _)| i)
-}
-
-pub fn prev_index<F>(rows: &[Row], from: usize, pred: F) -> Option<usize>
-where
-    F: Fn(&Row) -> bool,
-{
-    rows.iter()
-        .enumerate()
-        .take(from)
-        .rev()
-        .find(|(_, r)| pred(r))
-        .map(|(i, _)| i)
-}
-
-pub fn is_file_header(r: &Row) -> bool {
-    matches!(r, Row::FileHeader { .. })
-}
-
-pub fn is_hunk_header(r: &Row) -> bool {
-    matches!(r, Row::HunkHeader { .. })
-}
-
-pub fn is_thread(r: &Row) -> bool {
-    matches!(
-        r,
-        Row::ThreadHeader { .. } | Row::ThreadResolvedSummary { .. }
-    )
 }
 
 pub fn current_diff_line(state: &State, rows: &[Row], cursor: usize) -> Option<(String, u32)> {
@@ -180,13 +137,6 @@ pub fn current_thread_idx(rows: &[Row], cursor: usize) -> Option<usize> {
         Row::ThreadHeader { thread_idx }
         | Row::ThreadComment { thread_idx, .. }
         | Row::ThreadResolvedSummary { thread_idx } => Some(*thread_idx),
-        _ => None,
-    }
-}
-
-pub fn current_draft_idx(rows: &[Row], cursor: usize) -> Option<usize> {
-    match rows.get(cursor)? {
-        Row::DraftMarker { draft_idx } => Some(*draft_idx),
         _ => None,
     }
 }

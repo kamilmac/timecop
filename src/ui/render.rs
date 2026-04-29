@@ -72,7 +72,6 @@ fn render_row(state: &State, row: &Row) -> Line<'static> {
             render_thread_comment(state, *thread_idx, *comment_idx)
         }
         Row::ThreadResolvedSummary { thread_idx } => render_thread_summary(state, *thread_idx),
-        Row::DraftMarker { draft_idx } => render_draft(state, *draft_idx),
     }
 }
 
@@ -111,20 +110,6 @@ fn render_file_header(state: &State, fi: usize) -> Line<'static> {
         spans.push(Span::styled(
             format!("{thread_count} thread{}", if thread_count == 1 { "" } else { "s" }),
             theme::comment_author(),
-        ));
-    }
-
-    let draft_count = state
-        .draft
-        .new_comments
-        .iter()
-        .filter(|c| c.file == file.path)
-        .count();
-    if draft_count > 0 {
-        spans.push(Span::raw("  "));
-        spans.push(Span::styled(
-            format!("{draft_count} draft{}", if draft_count == 1 { "" } else { "s" }),
-            theme::draft_marker(),
         ));
     }
 
@@ -222,48 +207,76 @@ fn render_thread_comment(state: &State, ti: usize, ci: usize) -> Line<'static> {
         spans.push(Span::raw(": "));
     }
     spans.push(Span::styled(body, theme::comment_body()));
+    append_reactions(&mut spans, &comment.reactions);
     Line::from(spans)
+}
+
+fn append_reactions(spans: &mut Vec<Span<'static>>, r: &crate::session::Reactions) {
+    if r.is_empty() {
+        return;
+    }
+    let pairs = [
+        ("👍", r.thumbs_up),
+        ("👎", r.thumbs_down),
+        ("❤️", r.heart),
+        ("🎉", r.hooray),
+        ("😄", r.laugh),
+        ("😕", r.confused),
+        ("🚀", r.rocket),
+        ("👀", r.eyes),
+    ];
+    for (emoji, count) in pairs {
+        if count > 0 {
+            spans.push(Span::raw("  ".to_string()));
+            spans.push(Span::styled(
+                format!("{emoji} {count}"),
+                theme::resolved(),
+            ));
+        }
+    }
 }
 
 fn render_thread_summary(state: &State, ti: usize) -> Line<'static> {
     let Some(thread) = state.session.overlay().and_then(|o| o.threads.get(ti)) else {
         return Line::from("");
     };
-    let first = thread
-        .comments
-        .first()
-        .map(|c| c.body.clone())
-        .unwrap_or_default();
-    let label = if thread.outdated {
-        "[outdated]"
-    } else {
-        "[resolved]"
-    };
-    Line::from(vec![
-        Span::raw("        ".to_string()),
-        Span::styled("┃ ".to_string(), theme::thread_bar()),
-        Span::styled(label.to_string(), if thread.outdated { theme::outdated() } else { theme::resolved() }),
-        Span::raw(" "),
-        Span::styled(
-            thread.comments.first().map(|c| c.author.clone()).unwrap_or_default(),
-            theme::resolved(),
-        ),
-        Span::raw(": "),
-        Span::styled(first_line_of(&first), theme::resolved()),
-    ])
-}
-
-fn render_draft(state: &State, di: usize) -> Line<'static> {
-    let Some(c) = state.draft.new_comments.get(di) else {
+    let Some(first) = thread.comments.first() else {
         return Line::from("");
     };
-    Line::from(vec![
+    let body_style = if thread.resolved || thread.outdated {
+        theme::resolved()
+    } else {
+        theme::comment_body()
+    };
+
+    let mut spans = vec![
         Span::raw("        ".to_string()),
         Span::styled("┃ ".to_string(), theme::thread_bar()),
-        Span::styled("[draft]".to_string(), theme::draft_marker()),
-        Span::raw(" you: "),
-        Span::styled(first_line_of(&c.body), theme::comment_body()),
-    ])
+        Span::styled(first.author.clone(), theme::comment_author()),
+        Span::raw(" · "),
+        Span::styled(relative_age(&first.created_at), theme::resolved()),
+        Span::raw(": "),
+        Span::styled(first_line_of(&first.body), body_style),
+    ];
+
+    let extra = thread.comments.len().saturating_sub(1);
+    if extra > 0 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(
+            format!("(+{extra})"),
+            theme::resolved(),
+        ));
+    }
+    if thread.resolved {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("[resolved]".to_string(), theme::resolved()));
+    }
+    if thread.outdated {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled("[outdated]".to_string(), theme::outdated()));
+    }
+
+    Line::from(spans)
 }
 
 fn first_line_of(s: &str) -> String {
@@ -284,7 +297,6 @@ fn render_input(input: &InputState, frame: &mut Frame, area: Rect) {
     let title = match &input.target {
         InputTarget::NewComment { file, line } => format!(" New comment · {file}:{line} "),
         InputTarget::Reply { .. } => " Reply ".to_string(),
-        InputTarget::EditDraft { .. } => " Edit draft ".to_string(),
     };
     let block = Block::default()
         .title(title)
@@ -321,10 +333,6 @@ fn render_verdict(frame: &mut Frame, area: Rect) {
         Line::from(vec![
             Span::styled(" x ", Style::default().add_modifier(Modifier::REVERSED)),
             Span::raw("  Request changes"),
-        ]),
-        Line::from(vec![
-            Span::styled(" Enter ", Style::default().add_modifier(Modifier::REVERSED)),
-            Span::raw("  Comment"),
         ]),
         Line::from(""),
         Line::from(vec![

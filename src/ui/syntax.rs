@@ -25,7 +25,7 @@ impl Highlighter {
         let theme_set = ThemeSet::load_defaults();
         let theme = theme_set
             .themes
-            .get("base16-ocean.dark")
+            .get("base16-mocha.dark")
             .cloned()
             .unwrap_or_else(|| {
                 theme_set

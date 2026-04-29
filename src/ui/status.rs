@@ -22,26 +22,12 @@ pub fn render(state: &State, frame: &mut Frame, area: Rect) {
 
     let n_files = state.session.diff().files.len();
     spans.push(Span::raw(format!(
-        "{n_files} file{} · ",
+        "{n_files} file{}",
         if n_files == 1 { "" } else { "s" }
     )));
 
-    let n_drafts = state.draft.new_comments.len() + state.draft.replies.len();
-    if n_drafts > 0 {
-        spans.push(Span::styled(
-            format!("{n_drafts} draft{} · ", if n_drafts == 1 { "" } else { "s" }),
-            theme::draft_marker(),
-        ));
-    }
-
-    if !state.draft.resolutions.is_empty() {
-        spans.push(Span::styled(
-            format!("resolved {} · ", state.draft.resolutions.len()),
-            theme::resolved(),
-        ));
-    }
-
     if let Some(msg) = &state.status_message {
+        spans.push(Span::raw(" · "));
         spans.push(Span::styled(msg.clone(), theme::warning()));
     }
 

@@ -1,72 +1,86 @@
 # TimeCop
 
-"Navigate commits like Van Damme navigates time. But sitting down."
+> "Navigate commits like Van Damme navigates time. But sitting down."
 
-A terminal UI for reviewing pull requests and navigating commit history.
-
-<img src="screenshots/timecop.png" height="350" />
+A terminal UI for reviewing GitHub PRs and local branches — built for the agent loop. Open a PR and edit it like you would on github.com. Open a local branch and yank code straight to your clipboard for your coding agent.
 
 > Press `?` inside the app to see all keybindings.
 
-## Features
+## Modes
 
-- **Timeline scrubbing** — Step through commits, wip changes, full diff, or browse all files with `,` and `.`
-- **Side-by-side diffs** — Split or unified view with auto-switching on narrow terminals
-- **Syntax highlighting** — Language-aware coloring for diffs and file content
-- **Inline PR comments** — See review comments right in the diff where they belong
-- **PR actions** — Comment, approve, or request changes without leaving the terminal
-- **All PRs in one view** — Browse open pull requests, see review status, check out branches
-- **Keyboard-driven** — Fast vim-style navigation, no mouse required
+### PR mode
 
-## Screenshot
+`timecop <PR#>`
 
-<img src="screenshots/overview.png" width="700" />
+Renders the PR diff with existing review threads inline. Edits hit GitHub immediately — no draft staging.
+
+| Key | Action |
+|-----|--------|
+| `c` | Comment / reply (auto-detect: line → new comment, thread → reply) |
+| `R` | Toggle resolved on the thread under cursor |
+| `+` | 👍 react on the comment under cursor |
+| `Enter` | Verdict picker — `a` approve, `x` request changes |
+| `r` | Refresh from GitHub |
+| `y` | Yank code line / thread to clipboard with context |
+
+### Branch mode
+
+`timecop` (current branch) or `timecop <branch>`
+
+Read-only diff against `merge-base(HEAD, origin/main)`. For the current branch, the working tree is included so you see uncommitted edits too.
+
+| Key | Action |
+|-----|--------|
+| `y` | Yank code line / thread under cursor (file:line + context, prefixed with branch name) |
+| `o` | Open file in `$EDITOR` at the right line |
+| `r` | Refresh (recompute diff) |
+
+Clipboard payload format:
+
+```
+Branch: feat/foo (vs refs/remotes/origin/main)
+
+src/app.rs:142  (in fn handle_key)
+> let x = unwrap();
+```
+
+Paste at Claude / Cursor / whoever.
+
+## Movement
+
+| Key | Action |
+|-----|--------|
+| `j` / `k` | Line down / up |
+| `J` / `K` | Fast (5 lines) |
+| `Ctrl-f` / `Ctrl-b` | Full page |
+| `g g` / `G` | Top / bottom |
+| `Space` | Toggle file / thread under cursor |
+| `h` / `l` | Collapse / expand |
+| `z` | Toggle all files |
 
 ## Install
 
-**Quick install (macOS/Linux):**
-```bash
-curl -fsSL https://raw.githubusercontent.com/kamilmac/timecop/main/install.sh | sh
-```
-
-**Build from source:**
 ```bash
 git clone https://github.com/kamilmac/timecop
 cd timecop
-cargo build --release
-cp target/release/timecop ~/.local/bin/  # or anywhere in your PATH
+cargo install --path .
 ```
 
 ## Requirements
 
 - Git
-- [gh CLI](https://cli.github.com/) — for PR features (list, approve, comment)
-  - Run `gh auth login` to authenticate
+- [`gh` CLI](https://cli.github.com/) for PR mode (`gh auth login`)
 
-## Usage
+## Architecture
 
-```bash
-timecop              # Run in current directory
-timecop /path/to/repo
-```
+Four vertical-slice modules under `src/`:
 
-### Key Bindings
+- **`app/`** — central state, key dispatch, clipboard formatter
+- **`diff/`** — pure diff types + acquisition (libgit2 for branch, unified-diff parsing for PR)
+- **`session/`** — IO boundary: branch or PR session, owns all `gh` and libgit2 calls
+- **`ui/`** — read-only render layer (stacked diff, scroll, fold, theme, syntect highlighting, modals)
 
-| Key | Action |
-|-----|--------|
-| `,` `.` | Timeline: older / newer (commits → wip → full → files) |
-| `j` `k` | Navigate up/down |
-| `J` `K` | Fast navigate (5 lines) |
-| `h` `l` | Collapse / expand folder |
-| `Tab` | Cycle through panes |
-| `s` | Toggle split/unified diff view |
-| `o` | Open file in $EDITOR |
-| `y` | Yank path to clipboard |
-| `r` | Refresh |
-| `c` | Add comment |
-| `a` | Approve PR |
-| `x` | Request changes |
-| `?` | Show all keybindings |
+See [docs/design.md](docs/design.md).
 
 ## License
 

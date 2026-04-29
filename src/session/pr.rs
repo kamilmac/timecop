@@ -1,7 +1,6 @@
 use crate::diff;
 use crate::diff::types::Diff;
-use crate::review::types::{Draft, Verdict};
-use crate::session::{ExistingComment, Overlay, Thread};
+use crate::session::{ExistingComment, Overlay, Reactions, Thread, Verdict};
 use anyhow::{Context, Result, anyhow};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -29,19 +28,12 @@ struct PrView {
     base_ref_name: String,
     #[serde(rename = "headRefOid")]
     head_ref_oid: String,
-    #[serde(rename = "baseRepository")]
-    base_repository: PrRepo,
 }
 
 #[derive(Deserialize)]
-struct PrRepo {
-    name: String,
-    owner: PrOwner,
-}
-
-#[derive(Deserialize)]
-struct PrOwner {
-    login: String,
+struct RepoView {
+    #[serde(rename = "nameWithOwner")]
+    name_with_owner: String,
 }
 
 #[derive(Deserialize, Debug)]
@@ -55,11 +47,48 @@ struct ReviewComment {
     body: String,
     user: User,
     created_at: String,
+    #[serde(default)]
+    reactions: ReactionsRaw,
 }
 
 #[derive(Deserialize, Debug)]
 struct User {
     login: String,
+}
+
+#[derive(Deserialize, Debug, Default)]
+struct ReactionsRaw {
+    #[serde(default, rename = "+1")]
+    thumbs_up: u32,
+    #[serde(default, rename = "-1")]
+    thumbs_down: u32,
+    #[serde(default)]
+    heart: u32,
+    #[serde(default)]
+    hooray: u32,
+    #[serde(default)]
+    laugh: u32,
+    #[serde(default)]
+    confused: u32,
+    #[serde(default)]
+    rocket: u32,
+    #[serde(default)]
+    eyes: u32,
+}
+
+impl From<&ReactionsRaw> for Reactions {
+    fn from(r: &ReactionsRaw) -> Self {
+        Reactions {
+            thumbs_up: r.thumbs_up,
+            thumbs_down: r.thumbs_down,
+            heart: r.heart,
+            hooray: r.hooray,
+            laugh: r.laugh,
+            confused: r.confused,
+            rocket: r.rocket,
+            eyes: r.eyes,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -114,11 +143,15 @@ pub fn open(pr_number: u32) -> Result<PrSession> {
         "view",
         &pr_number.to_string(),
         "--json",
-        "number,body,headRefName,baseRefName,headRefOid,baseRepository",
+        "number,body,headRefName,baseRefName,headRefOid",
     ])?;
 
-    let owner = view.base_repository.owner.login.clone();
-    let repo = view.base_repository.name.clone();
+    let repo_view: RepoView = run_gh_json(&["repo", "view", "--json", "nameWithOwner"])?;
+    let (owner, repo) = repo_view
+        .name_with_owner
+        .split_once('/')
+        .map(|(o, r)| (o.to_string(), r.to_string()))
+        .ok_or_else(|| anyhow!("malformed nameWithOwner: {}", repo_view.name_with_owner))?;
 
     let unified = run_gh_text(&["pr", "diff", &pr_number.to_string()])?;
     let diff = diff::parse::parse(&unified)?;
@@ -189,9 +222,11 @@ fn build_threads(
             comments: thread_comments
                 .into_iter()
                 .map(|c| ExistingComment {
+                    id: c.id,
                     author: c.user.login.clone(),
                     created_at: c.created_at.clone(),
                     body: c.body.clone(),
+                    reactions: Reactions::from(&c.reactions),
                 })
                 .collect(),
             resolved,
@@ -220,61 +255,70 @@ fn fetch_resolution_map(
     Ok(map)
 }
 
-pub fn apply(session: &PrSession, draft: &Draft) -> Result<()> {
-    if !draft.new_comments.is_empty() || draft.verdict.is_some() {
-        let event = match draft.verdict.unwrap_or(Verdict::Comment) {
-            Verdict::Approve => "APPROVE",
-            Verdict::RequestChanges => "REQUEST_CHANGES",
-            Verdict::Comment => "COMMENT",
-        };
-        let comments: Vec<_> = draft
-            .new_comments
-            .iter()
-            .map(|c| {
-                serde_json::json!({
-                    "path": c.file,
-                    "line": c.line,
-                    "side": "RIGHT",
-                    "body": c.body,
-                })
-            })
-            .collect();
-        let body = serde_json::json!({
-            "commit_id": session.head_sha,
-            "event": event,
-            "body": "",
-            "comments": comments,
-        });
-        let path = format!(
-            "repos/{}/{}/pulls/{}/reviews",
-            session.owner, session.repo, session.number
-        );
-        gh_post_json(&["api", "-X", "POST", &path, "--input", "-"], &body)?;
-    }
+pub fn post_comment(session: &PrSession, file: &str, line: u32, body: &str) -> Result<()> {
+    let path = format!(
+        "repos/{}/{}/pulls/{}/comments",
+        session.owner, session.repo, session.number
+    );
+    let body_json = serde_json::json!({
+        "commit_id": session.head_sha,
+        "path": file,
+        "line": line,
+        "side": "RIGHT",
+        "body": body,
+    });
+    gh_post_json(&["api", "-X", "POST", &path, "--input", "-"], &body_json)?;
+    Ok(())
+}
 
-    for r in &draft.replies {
-        let root_id = session
-            .overlay
-            .threads
-            .iter()
-            .find(|t| t.node_id == r.thread_id)
-            .ok_or_else(|| anyhow!("reply target thread not found"))?
-            .root_comment_id;
-        let path = format!(
-            "repos/{}/{}/pulls/{}/comments/{}/replies",
-            session.owner, session.repo, session.number, root_id
-        );
-        let body = serde_json::json!({ "body": r.body });
-        gh_post_json(&["api", "-X", "POST", &path, "--input", "-"], &body)?;
-    }
+pub fn post_reaction(session: &PrSession, comment_id: u64, content: &str) -> Result<()> {
+    let path = format!(
+        "repos/{}/{}/pulls/comments/{}/reactions",
+        session.owner, session.repo, comment_id
+    );
+    let body = serde_json::json!({ "content": content });
+    gh_post_json(&["api", "-X", "POST", &path, "--input", "-"], &body)?;
+    Ok(())
+}
 
-    for thread_node_id in &draft.resolutions {
-        let mutation = format!(
-            r#"mutation {{ resolveReviewThread(input: {{threadId: "{thread_node_id}"}}) {{ thread {{ isResolved }} }} }}"#
-        );
-        run_gh_text(&["api", "graphql", "-f", &format!("query={mutation}")])?;
-    }
+pub fn post_reply(session: &PrSession, root_comment_id: u64, body: &str) -> Result<()> {
+    let path = format!(
+        "repos/{}/{}/pulls/{}/comments/{}/replies",
+        session.owner, session.repo, session.number, root_comment_id
+    );
+    let body_json = serde_json::json!({ "body": body });
+    gh_post_json(&["api", "-X", "POST", &path, "--input", "-"], &body_json)?;
+    Ok(())
+}
 
+pub fn submit_verdict(session: &PrSession, verdict: Verdict) -> Result<()> {
+    let event = match verdict {
+        Verdict::Approve => "APPROVE",
+        Verdict::RequestChanges => "REQUEST_CHANGES",
+    };
+    let body = serde_json::json!({
+        "commit_id": session.head_sha,
+        "event": event,
+        "body": "",
+    });
+    let path = format!(
+        "repos/{}/{}/pulls/{}/reviews",
+        session.owner, session.repo, session.number
+    );
+    gh_post_json(&["api", "-X", "POST", &path, "--input", "-"], &body)?;
+    Ok(())
+}
+
+pub fn set_resolved(thread_node_id: &str, resolved: bool) -> Result<()> {
+    let mutation_name = if resolved {
+        "resolveReviewThread"
+    } else {
+        "unresolveReviewThread"
+    };
+    let mutation = format!(
+        r#"mutation {{ {mutation_name}(input: {{threadId: "{thread_node_id}"}}) {{ thread {{ isResolved }} }} }}"#
+    );
+    run_gh_text(&["api", "graphql", "-f", &format!("query={mutation}")])?;
     Ok(())
 }
 

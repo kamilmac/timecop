@@ -5,7 +5,6 @@ use std::path::Path;
 
 pub fn compute(repo_path: &Path, base_ref: &str, head_ref: &str) -> Result<Diff> {
     let repo = Repository::open(repo_path).context("open repo")?;
-
     let base_oid = repo
         .revparse_single(base_ref)
         .with_context(|| format!("resolve base ref {base_ref}"))?
@@ -16,23 +15,44 @@ pub fn compute(repo_path: &Path, base_ref: &str, head_ref: &str) -> Result<Diff>
         .with_context(|| format!("resolve head ref {head_ref}"))?
         .peel_to_commit()?
         .id();
-
-    let merge_base = repo
-        .merge_base(base_oid, head_oid)
-        .context("merge-base")?;
-
+    let merge_base = repo.merge_base(base_oid, head_oid).context("merge-base")?;
     let base_tree = repo.find_commit(merge_base)?.tree()?;
     let head_tree = repo.find_commit(head_oid)?.tree()?;
 
     let mut opts = DiffOptions::new();
     opts.context_lines(3);
     let diff = repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut opts))?;
+    diff_to_files(&diff)
+}
 
+pub fn compute_workdir(repo_path: &Path, base_ref: &str) -> Result<Diff> {
+    let repo = Repository::open(repo_path).context("open repo")?;
+    let base_oid = repo
+        .revparse_single(base_ref)
+        .with_context(|| format!("resolve base ref {base_ref}"))?
+        .peel_to_commit()?
+        .id();
+    let head_oid = repo
+        .revparse_single("HEAD")
+        .context("resolve HEAD")?
+        .peel_to_commit()?
+        .id();
+    let merge_base = repo.merge_base(base_oid, head_oid).context("merge-base")?;
+    let base_tree = repo.find_commit(merge_base)?.tree()?;
+
+    let mut opts = DiffOptions::new();
+    opts.context_lines(3);
+    opts.include_untracked(false);
+    let diff = repo.diff_tree_to_workdir_with_index(Some(&base_tree), Some(&mut opts))?;
+    diff_to_files(&diff)
+}
+
+fn diff_to_files(diff: &git2::Diff<'_>) -> Result<Diff> {
     let mut files: Vec<File> = Vec::new();
     let num_deltas = diff.deltas().count();
 
     for idx in 0..num_deltas {
-        let patch = match git2::Patch::from_diff(&diff, idx)? {
+        let patch = match git2::Patch::from_diff(diff, idx)? {
             Some(p) => p,
             None => continue,
         };

@@ -4,7 +4,6 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub enum InputTarget {
     NewComment { file: String, line: u32 },
     Reply { thread_id: String },
-    EditDraft { draft_idx: usize },
 }
 
 #[derive(Debug, Clone)]
@@ -18,9 +17,6 @@ impl InputState {
         Self { target, buffer: String::new() }
     }
 
-    pub fn with_body(target: InputTarget, body: String) -> Self {
-        Self { target, buffer: body }
-    }
 }
 
 pub enum InputResult {

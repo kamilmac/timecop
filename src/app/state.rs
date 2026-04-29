@@ -1,4 +1,3 @@
-use crate::review::types::Draft;
 use crate::session::Session;
 use crate::ui::fold::FoldState;
 use crate::ui::input::InputState;
@@ -10,25 +9,17 @@ use std::path::PathBuf;
 pub struct State {
     pub session: Session,
     pub repo_path: PathBuf,
-    pub draft: Draft,
     pub scroll: ScrollState,
     pub fold: FoldState,
-    pub expanded_resolved: HashSet<usize>,
+    pub thread_overrides: HashSet<usize>,
     pub input: Option<InputState>,
     pub show_help: bool,
     pub show_verdict: bool,
     pub pending_g: bool,
-    pub pending_bracket: Option<Bracket>,
     pub pending_editor: Option<(String, u32)>,
     pub quit: bool,
     pub status_message: Option<String>,
     pub highlighter: Highlighter,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Bracket {
-    Open,
-    Close,
 }
 
 impl State {
@@ -37,15 +28,13 @@ impl State {
         Self {
             session,
             repo_path,
-            draft: Draft::default(),
             scroll: ScrollState::new(),
             fold: FoldState::new(&paths),
-            expanded_resolved: HashSet::new(),
+            thread_overrides: HashSet::new(),
             input: None,
             show_help: false,
             show_verdict: false,
             pending_g: false,
-            pending_bracket: None,
             pending_editor: None,
             quit: false,
             status_message: None,

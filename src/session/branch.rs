@@ -14,9 +14,11 @@ pub struct BranchSession {
 pub fn open(repo_path: PathBuf, branch: Option<String>) -> Result<BranchSession> {
     let repo = Repository::open(&repo_path).context("open repo")?;
 
-    let head_ref = match branch {
-        Some(b) => b,
-        None => current_branch(&repo)?,
+    let current = current_branch(&repo)?;
+    let (head_ref, include_workdir) = match branch {
+        None => (current.clone(), true),
+        Some(b) if b == current => (current.clone(), true),
+        Some(b) => (b, false),
     };
 
     let base_ref = pick_base_ref(&repo)?;
@@ -26,7 +28,11 @@ pub fn open(repo_path: PathBuf, branch: Option<String>) -> Result<BranchSession>
     let merge_base_oid = repo.merge_base(base_oid, head_oid)?;
     let merge_base_short = format!("{merge_base_oid}").chars().take(7).collect();
 
-    let diff = diff::compute::compute(&repo_path, &base_ref, &head_ref)?;
+    let diff = if include_workdir {
+        diff::compute::compute_workdir(&repo_path, &base_ref)?
+    } else {
+        diff::compute::compute(&repo_path, &base_ref, &head_ref)?
+    };
 
     Ok(BranchSession {
         base_ref,
