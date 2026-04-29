@@ -1,410 +1,326 @@
-# TimeCop Design Document
+# TimeCop — Design
 
-A terminal UI for code review, built with Rust and Ratatui.
+## What this is
 
-## Vision
+A terminal tool for reviewing branch or PR changes the way you'd review a teammate's PR — except the teammate is a coding agent.
 
-When AI writes code, you need:
-- **Visibility** - see what changed
-- **Navigation** - understand the codebase
-- **Review** - approve changes with confidence
-- **Context** - PR comments alongside code
+You open the tool on a branch (or PR), read the diff, leave inline comments, and either copy them out for an agent to act on, or apply them to a GitHub PR as a real review.
 
-This is read-heavy, not write-heavy. The human reviews, the AI writes.
+## The loop it serves
 
-## Timeline Navigation
+1. Agent writes code on a branch.
+2. You open `timecop` on that branch (or `timecop <PR#>` if there's a PR).
+3. You scroll the diff, leave comments and replies. Comments stay local.
+4. You finish the review with one explicit action:
+   - **Branch mode** → `y` copies all comments + surrounding code to the clipboard. Paste into your agent.
+   - **PR mode** → `Enter` opens a verdict picker (approve / request changes / comment), submits one batched review to GitHub.
+5. Agent addresses the comments. You re-open and review again.
 
-TimeCop lets you time-travel through PR history. The header shows your position:
+The tool has no opinion about what happens between sessions. State lives where it belongs: drafts in memory, applied comments on GitHub.
 
-```
-T─I─M─E─C─O─P─○─○─○─●─[full]─[files]
-              -3-2-1 wip full  files
-              ◄─────────────────────►
-              older            newer
-```
-
-| Position | Description |
-|----------|-------------|
-| `-N` | Single commit diff (HEAD~N → HEAD~(N-1)) |
-| `wip` | Uncommitted changes (HEAD → working tree) |
-| `full` | All changes vs base branch (default) |
-| `files` | Browse all repository files |
-
-Navigate with `,` (older) and `.` (newer).
-
-### Diff Calculation
-
-Diffs are calculated relative to the **merge-base** with remote:
+## Invocation
 
 ```
-     origin/main
-           │
-     A─────B─────C─────D      ← remote main
-           │
-           └──E──F──G──H      ← your branch (HEAD)
-              │
-              merge-base (B)
+timecop                  # current branch vs origin/main (merge-base)
+timecop <branch>         # named branch vs origin/main (merge-base)
+timecop <PR#>            # PR head vs PR base, via gh
 ```
 
-- **full** = B → H (all changes since branching)
-- **wip** = H → working directory
-- **-1** = G → H (most recent commit)
+A branch with no associated PR works in branch mode. A PR# works in PR mode. The tool picks the mode from the argument shape — no flag.
 
-Uses `simplify_first_parent()` to ignore merge commits from main.
+## The view
 
-## Architecture
+One window, top-down scroll. No tree pane, no split pane.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                         main.rs                              │
-│              Terminal setup, event loop                      │
-└─────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-┌─────────────────┐  ┌─────────────┐  ┌─────────────────┐
-│   EventHandler  │  │     App     │  │    Terminal     │
-│   (event.rs)    │  │  (app.rs)   │  │   (ratatui)     │
-│                 │  │             │  │                 │
-│ • Keyboard      │  │ • State     │  │ • Raw mode      │
-│ • Mouse         │  │ • Logic     │  │ • Rendering     │
-│ • File watcher  │  │ • Commands  │  │                 │
-│ • Tick events   │  │             │  │                 │
-└─────────────────┘  └─────────────┘  └─────────────────┘
-                              │
-         ┌────────────────────┼────────────────────┐
-         ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  AsyncLoader    │  │  GitHubClient   │  │   UI Widgets    │
-│                 │  │   (gh CLI)      │  │                 │
-│ • PR list       │  │ • PR info       │  │ • FileList      │
-│ • PR details    │  │ • Comments      │  │ • DiffView      │
-│                 │  │ • Reviews       │  │ • PrListPanel   │
-└─────────────────┘  │ • Actions       │  │ • PrDetailsView │
-         │           └─────────────────┘  │ • HelpModal     │
-         ▼                                │ • InputModal    │
-┌─────────────────┐                       └─────────────────┘
-│   GitClient     │
-│  (libgit2)      │
-│                 │
-│ • Status        │
-│ • Diff          │
-│ • Log           │
-└─────────────────┘
+PR #142 · feat/foo → main · 8 files · 2 drafts                      142/890
+─────────────────────────────────────────────────────────────────────────────
+Description
+  Adds the new event router. See INC-411.
+
+▸ src/app.rs                         [+12 -4]   1 thread
+▸ src/foo.rs                         [+3  -1]
+▾ src/bar.rs                         [+8  -2]
+   @@ fn parse @@
+     pub fn parse(input: &str) -> Foo {
+   -     input.trim().to_lowercase()
+   +     input.trim_start().to_lowercase()
+       ┃ alice · 2d
+       ┃   does this still strip trailing whitespace?
+       ┃   └─ [draft] you: yes — trim_start only changes leading
+   }
+   ...
+▸ src/baz.rs                         [+1  -0]
 ```
 
-## Event Flow
+- Files default to **all collapsed** — file headers form a table of contents you walk through.
+- Unified diff only. No side-by-side.
+- Threads render inline, anchored to their line. Drafts render with a `[draft]` marker.
+- Resolved threads collapse to a one-liner. Outdated threads show with a marker but stay visible.
+
+## The two modes
+
+PR mode is branch mode plus an overlay. The data and view layer don't fork — only the source and sink differ.
+
+|                | Branch                                  | PR                                                          |
+| -------------- | --------------------------------------- | ----------------------------------------------------------- |
+| **Diff source**| libgit2: `merge-base(HEAD, origin/main)` … `HEAD` | `gh pr diff <n>`, parse unified                  |
+| **Overlay**    | none                                    | description, existing review threads, resolution state      |
+| **Sink**       | clipboard (formatted plaintext)         | batched GitHub review via `gh api`                          |
+| **Verdicts**   | n/a                                     | approve / request changes / comment-only                    |
+
+Both modes yield the same internal `Diff` representation (`File` → `Hunk` → `Line`). The view never knows which mode produced it.
+
+## Diff acquisition
+
+**Branch mode** — pure libgit2:
 
 ```
-User Input → EventHandler → App.handle_key() → State Update → render()
-     ▲                                              │
-     │              Widget State Updates ◄──────────┘
-     │                      │
-     └──────────────────────┘
+base = merge-base(HEAD, origin/main)   // uses cached origin/main, no network
+head = HEAD
+diff = git_diff_tree_to_tree(base, head)
 ```
 
-1. EventHandler runs in separate thread, sends events via mpsc channel
-2. App receives events, updates state, delegates to focused widget
-3. On each frame, App renders all widgets with current state
-4. Commands (like open editor) are queued and executed after render
+This shows only changes the branch introduced — `origin/main` moving forward doesn't pollute the diff. No network fetch. If `origin/main` is stale, the user can fetch separately; we don't auto-fetch.
 
-### Async Loading
-
-Background tasks managed by `AsyncLoader`:
+**PR mode** — `gh` CLI:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                       AsyncLoader                            │
-├─────────────────────────────────────────────────────────────┤
-│  load_pr_list()    ──► spawns thread ──► poll_pr_list()     │
-│  load_pr_details() ──► spawns thread ──► poll_pr_details()  │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                    mpsc channels for results
-                              │
-                              ▼
-                    App.handle_tick() polls for completion
+gh pr view <n> --json headRefName,baseRefName,title,body,headRefOid
+gh pr diff <n>            // unified diff text
+gh api repos/{o}/{r}/pulls/<n>/comments    // existing line comments
+gh api graphql -f query='…'  // resolved-thread state
 ```
 
-## Layout
+Parse the unified diff into the same `Diff` types. No libgit2 in PR mode.
+
+## Review draft (data model)
+
+A single `Draft` struct holds everything you've authored this session:
 
 ```
-┌─────────────────┬──────────────────────────────────────────┐
-│   Header: T─I─M─E─C─O─P─○─○─●─[full]─[files]    ? help     │
-├─────────────────┼──────────────────────────────────────────┤
-│                 │                                          │
-│    FileList     │              DiffView                    │
-│                 │                                          │
-│  ▼ src/         │        (preview panel)                   │
-│    > app.rs  M  │                                          │
-│    > main.rs M  │   Side-by-side or unified diff           │
-│                 │   with syntax highlighting               │
-├─────────────────┤   and inline comments                    │
-│                 │                                          │
-│  PrListPanel    │                                          │
-│                 │                                          │
-│  #42 Fix bug    │                                          │
-│  #38 Add feat   │                                          │
-│                 │                                          │
-├─────────────────┴──────────────────────────────────────────┤
-│  main  +42 -15                        full diff (base→head)│
-└────────────────────────────────────────────────────────────┘
-```
-
-## Widgets
-
-### FileList
-
-Tree view of files with directory nesting.
-
-```
-Changed (4)
-▼ src/
-  > main.rs           M
-    app.rs            M
-▼ internal/
-  ▼ git/
-      client.rs       A
-  README.md           M
-```
-
-- `▼`/`▶` prefix for expanded/collapsed directories
-- Status indicators: M (modified), A (added), D (deleted), R (renamed)
-- `h` collapses, `l` expands
-- Comment indicator when file has PR comments
-
-### DiffView
-
-Side-by-side or unified diff viewer with syntax highlighting.
-
-**Split mode (default):**
-```
-  12 │ context line            │   12 │ context line
-  13 │-removed line            │      │
-     │                         │   13 │+added line
-  14 │ context line            │   14 │ context line
-```
-
-**Unified mode (auto-switches on narrow terminals):**
-```
-  12   context line
-  13 - removed line
-  13 + added line
-  14   context line
-```
-
-**Inline PR comments:**
-```
-  37 │ let result = process(); │   37 │ let result = process();
-     │ 💬 reviewer
-     │    This could be optimized
-  38 │ return result;          │   38 │ return result;
-```
-
-Toggle with `s`. Auto-switches to unified below 100 columns.
-
-### PrListPanel
-
-Shows open PRs for the repository.
-
-```
-Open PRs (3)
-> #42 Fix auth bug          alice    ✓
-  #38 Add dark mode         bob
-  #35 Refactor API          charlie
-```
-
-- Loads asynchronously via gh CLI
-- Shows PR number, title, author, review status
-- `Enter` to checkout, `o` to open in browser
-
-### PrDetailsView
-
-Shows when PR list is focused - displays PR metadata, body, reviews, and comments.
-
-### HelpModal
-
-Overlay showing all keybindings, toggled with `?`.
-
-### InputModal
-
-Text input for PR review actions (approve, request changes, comment).
-
-## Key Bindings
-
-### Global
-
-| Key | Action |
-|-----|--------|
-| `q` / `Ctrl+C` | Quit |
-| `?` | Toggle help |
-| `r` | Refresh |
-| `s` | Toggle split/unified diff |
-| `Tab` | Next pane |
-| `Shift+Tab` | Previous pane |
-| `,` | Timeline: older |
-| `.` | Timeline: newer |
-| `y` | Yank path to clipboard |
-| `o` | Open in editor (or PR in browser) |
-
-### Navigation
-
-| Key | Action |
-|-----|--------|
-| `j` / `↓` | Move down |
-| `k` / `↑` | Move up |
-| `J` / `K` | Fast move (5 lines) |
-| `Ctrl+d` / `Ctrl+u` | Page down/up |
-| `g` / `G` | Top / bottom |
-| `h` | Collapse folder |
-| `l` | Expand folder |
-
-### PR Review
-
-| Key | Action |
-|-----|--------|
-| `a` | Approve PR |
-| `x` | Request changes |
-| `c` | Add comment (PR-level or line-level) |
-
-## Data Structures
-
-### Core Types
-
-```rust
-pub enum TimelinePosition {
-    CommitDiff(usize),  // Single commit: HEAD~N → HEAD~(N-1)
-    Wip,                // Uncommitted: HEAD → workdir
-    FullDiff,           // All changes: merge-base → HEAD
-    Browse,             // All repository files
-}
-
-pub enum FileStatus {
-    Modified, Added, Deleted, Renamed, Untracked, Unchanged
-}
-
-pub struct StatusEntry {
-    pub path: String,
-    pub status: FileStatus,
+Draft {
+    new_comments: Vec<NewComment>      // (file, line, body)
+    replies:      Vec<Reply>           // (thread_id, body)
+    resolutions:  Vec<ThreadId>        // threads to mark resolved
+    verdict:      Option<Verdict>      // PR mode only
 }
 ```
 
-### GitHub Types
+Branch-mode drafts are just `new_comments` — the other fields stay empty.
 
-```rust
-pub struct PrInfo {
-    pub number: u64,
-    pub title: String,
-    pub body: String,
-    pub author: String,
-    pub reviews: Vec<Review>,
-    pub comments: Vec<Comment>,
-    pub file_comments: HashMap<String, Vec<Comment>>,
-}
+The draft is the single mutable thing in the app. Everything else (diff, overlay) is immutable for the session.
 
-pub struct PrSummary {
-    pub number: u64,
-    pub title: String,
-    pub author: String,
-    pub branch: String,
-    pub review_decision: Option<String>,
-}
+## Sinks
+
+### Branch mode — clipboard
+
+Pressing `y` formats the draft as plain text and copies it. Format:
+
+```
+src/app.rs:142  (in fn handle_key)
+> self.git.diff().unwrap()
+COMMENT: unwrap on user input — return Result instead
+
+src/foo.rs:23  (in fn parse_input)
+> pub fn parse_input(s: &str) -> Foo {
+COMMENT: rename to parse_user_input
 ```
 
-## Git Integration
+A few lines of context above each anchor line. Plaintext, not markdown — agents ingest plaintext just as well, and there's nothing to escape.
 
-Uses libgit2 (git2 crate) for native performance:
+### PR mode — batched GitHub review
 
-- Repository opening with path resolution
-- Status checking via index/workdir comparison
-- Diff generation between commits/trees
-- Commit history traversal with first-parent
-- Base branch auto-detection (origin/main, origin/master, main, master)
+Pressing `Enter` opens a verdict picker. On confirm, one POST to:
 
-## GitHub Integration
+```
+POST /repos/{o}/{r}/pulls/{n}/reviews
+  { event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+    body:  "" or top-level review body,
+    comments: [ { path, line, body }, … ] }
+```
 
-Uses gh CLI for GitHub API access:
+Replies and resolutions follow as separate calls (replies via the comments endpoint, resolutions via GraphQL `resolveReviewThread`).
 
-- PR list fetching for repository
-- PR details with reviews and comments
-- Inline comments mapped to file paths and lines
-- PR review submission (approve, request changes, comment)
-- PR branch checkout
-- Polling every 120 seconds for updates
+If any leg of the apply fails, the draft remains intact in the UI so the user can retry.
 
-## Configuration
+## PR overlay
 
-Centralized in `config.rs`:
+Only present in PR mode. Three pieces:
 
-**Colors (Catppuccin Mocha):**
-- Added: Green
-- Removed: Red/Pink
-- Modified: Peach
-- Header: Blue
-- Comments: Yellow on dark background
+- **Description header** at the top of the scroll, above the first file. Folded by default — `Space` on the header expands.
+- **Existing threads** rendered inline, anchored to their line, ordered by author and timestamp. Outdated threads (line moved/gone after a force-push) show with an `[outdated]` marker and don't accept replies.
+- **Verdict picker** — modal opened on `Enter`. Three options, default to "comment."
 
-**Timing:**
-- PR poll interval: 120 seconds
-- File watcher debounce: 300ms
+## Comment anchoring
 
-**Layout:**
-- Left panel: 30%
-- Right panel: 70%
+Comments anchor to `(file_path, line)` in the **new** version of the file. Simple, matches GitHub's model, survives re-opens because the diff is recomputed each session.
 
-## Project Structure
+When a draft's anchor line no longer exists (file edited between sessions), the draft is shown as **stale** in the UI — visible, ignored on apply, dismissible with `d`. The tool doesn't try to reanchor.
+
+For the branch-mode clipboard format, the surrounding code excerpt is generated at copy time from the current diff — so the agent always sees fresh context, never a stale snapshot.
+
+## Folder structure
+
+Vertical slices by domain. UI is read-only over a central state.
 
 ```
 src/
-├── main.rs           # Entry point, terminal setup, event loop
-├── app.rs            # Main application state and logic
-├── async_loader.rs   # Background task management
-├── event.rs          # Event handling, key input helpers
-├── config.rs         # Colors, timing, theme
-├── theme.rs          # Light/dark theme detection
-├── git/
+├── main.rs                # arg parsing, terminal setup, hands off to app
+├── app/                   # CENTRAL STATE — single source of truth
 │   ├── mod.rs
-│   ├── types.rs      # TimelinePosition, FileStatus, StatusEntry
-│   └── client.rs     # Git operations using libgit2
-├── github/
-│   └── mod.rs        # GitHub API client using gh CLI
-└── ui/
+│   ├── state.rs           # State struct (owns everything below)
+│   └── action.rs          # Action enum + dispatch (only place mutations happen)
+├── session/               # WHERE diff comes from + WHERE draft goes
+│   ├── mod.rs             # Session enum: Branch | Pr
+│   ├── branch.rs          # libgit2 + clipboard sink
+│   └── pr.rs              # gh CLI + GitHub review sink + overlay loader
+├── diff/                  # pure git-diff representation
+│   ├── mod.rs
+│   ├── types.rs           # File, Hunk, Line
+│   ├── compute.rs         # libgit2 ref-pair → Diff (branch mode)
+│   └── parse.rs           # unified-diff text → Diff (PR mode)
+├── review/                # local draft state
+│   ├── mod.rs
+│   ├── types.rs           # Draft, NewComment, Reply, Verdict, ThreadId
+│   └── format.rs          # clipboard formatter
+└── ui/                    # VISUALIZATION LAYER (read-only)
     ├── mod.rs
-    ├── layout.rs     # Responsive layout computation
-    ├── syntax.rs     # Syntax highlighting (syntect)
-    └── widgets/
-        ├── mod.rs
-        ├── file_list/    # Tree view widget
-        ├── diff_view/    # Diff preview with parser
-        ├── pr_list/      # PR list panel
-        ├── pr_details/   # PR details view
-        ├── help/         # Help modal
-        └── input/        # Input modal for reviews
+    ├── render.rs          # the stacked diff render
+    ├── syntax.rs          # syntect wrapper + per-file cache
+    ├── scroll.rs          # viewport math, navigation
+    ├── fold.rs            # collapsed-files set + toggle logic
+    ├── status.rs          # bottom status line
+    ├── help.rs            # `?` overlay
+    ├── theme.rs           # named styles (no magic colors elsewhere)
+    └── input.rs           # comment authoring modal
 ```
 
-## Performance
+## Domain boundaries
 
-- Native libgit2 (no shell overhead for git operations)
-- Async loading for PR list and details
-- Debounced file watching (300ms)
-- Lazy PR polling (120s intervals)
-- Offset-based viewport rendering
-- Syntax highlight caching per file
-- Release build: LTO, single codegen unit, stripped binary
+```
+       ui ──────────────► reads &State, never mutates
+        │
+        ▼
+       app  ◄──► session  (loads Diff & Overlay, delivers Draft)
+        │
+        ├── owns ──► review (Draft)
+        └── holds ──► diff::types (Diff is computed once per session)
 
-## Error Handling
+   session ──uses──► diff::compute  (branch)
+   session ──uses──► diff::parse    (PR)
+   session ──uses──► review::format (branch sink: clipboard)
+```
 
-- Uses `anyhow::Result<T>` throughout
-- Background task failures logged, don't crash app
-- Graceful fallbacks:
-  - Missing gh CLI: PR features disabled
-  - Missing base branch: falls back to working status
-  - Binary files: shows "Binary file" message
+Hard rules:
 
-## External Editor
+- **`ui/` is read-only.** Receives `&State`, returns events. No git, no `gh`, no clipboard, no network.
+- **`app/` is the only mutator.** Every change is an `Action` dispatched through one function. Read anywhere, mutate in one place.
+- **`session/` is the I/O boundary.** Only place that touches git, `gh`, network, or clipboard.
+- **`diff/` and `review/` are pure.** No I/O, no ratatui, no `gh`. Self-contained, unit-testable in isolation.
+- **No `if pr_mode` branches.** Mode-specific behavior lives in `session/branch.rs` or `session/pr.rs`. Everywhere else, the code asks "is there an overlay?" — not "what mode are we in?"
 
-Opens files in `$EDITOR` with line number support:
+## Keymap
 
-- **vim/nvim**: `+{line}` argument
-- **helix**: `{file}:{line}` format
+### Movement (vim-canonical)
 
-Terminal suspended during editor session, auto-refresh on close.
+| Key             | Action                            |
+| --------------- | --------------------------------- |
+| `j` / `k`       | Line down / up                    |
+| `Ctrl-d` / `Ctrl-u` | Half page                     |
+| `Ctrl-f` / `Ctrl-b` | Full page                     |
+| `g g` / `G`     | Top / bottom                      |
+| `] c` / `[ c`   | Next / previous change hunk       |
+| `] f` / `[ f`   | Next / previous file header       |
+| `] r` / `[ r`   | Next / previous review thread     |
+
+### Folding
+
+| Key      | Action                                                  |
+| -------- | ------------------------------------------------------- |
+| `Space`  | Toggle file under cursor                                |
+| `z`      | Toggle all (anything open → close all, else open all)   |
+
+### Review actions
+
+| Key       | Action                                              |
+| --------- | --------------------------------------------------- |
+| `c`       | New comment on line under cursor                    |
+| `r`       | Reply to thread under cursor                        |
+| `R`       | Toggle "resolved" on thread                         |
+| `e`       | Edit draft under cursor                             |
+| `d`       | Delete draft under cursor                           |
+| `o`       | Open file in `$EDITOR` at the relevant line         |
+| `y`       | Yank review to clipboard (branch mode)              |
+| `Enter`   | Apply review (PR mode) — opens verdict picker       |
+
+In the verdict picker: `a` approve, `x` request changes, `Enter` comment-only, `Esc` cancel.
+
+### Modal / global
+
+| Key      | Action                                  |
+| -------- | --------------------------------------- |
+| `?`      | Help                                    |
+| `Esc`    | Close modal / cancel input              |
+| `q`      | Quit (warns if drafts unsaved)          |
+| `Ctrl-c` | Force quit                              |
+
+### Reserved (deferred — don't bind)
+
+`/` search · `n` / `N` next / prev match · `:` command mode
+
+## Open file in editor — details
+
+`o` opens `$EDITOR` (fallback `hx`) at a line.
+
+| Cursor on             | Opens at                                        |
+| --------------------- | ----------------------------------------------- |
+| File header           | Line 1                                          |
+| Context line or `+`   | The new line number                             |
+| `-` line              | Next surviving line in the new version          |
+| Existing thread       | Thread anchor line                              |
+| Draft                 | Draft anchor line                               |
+
+Editor command construction: `$EDITOR <path>:<line>` with a small lookup table for editors that don't accept that form (`vim +line file`, `code -g file:line`, etc.).
+
+In PR mode, the file on disk may not match the PR's head ref if the user is on a different branch. The status line shows a warning when `HEAD != session.head_ref`. We don't auto-checkout.
+
+TUI suspend/resume follows the standard ratatui pattern: leave alternate screen, spawn editor synchronously, wait, re-enter alternate screen, redraw.
+
+## Status line
+
+Always visible, bottom of screen.
+
+**Branch mode:**
+```
+feat/foo → origin/main (merge-base abc1234) · 8 files · 3 drafts ·  142/890
+```
+
+**PR mode:**
+```
+PR #142 · feat/foo → main · 8 files · 3 drafts · resolved 1 ·  142/890
+```
+
+If `HEAD != session.head_ref` in PR mode, prepend `⚠ branch:HEAD ` to flag the mismatch.
+
+## Theming
+
+Single dark theme to start. `ui/theme.rs` defines named styles — `DiffAdd`, `DiffRemove`, `HunkHeader`, `FileHeader`, `CommentAuthor`, `DraftMarker`, `Outdated`, `Resolved`, etc. The render layer references names; nothing else hardcodes colors. Configurable themes are deferred until there's a second theme.
+
+## Out of scope (deferred)
+
+These are real features that aren't in v1. Each has a clean place to slot in later — none require structural changes.
+
+- **Search** (`/`, `n`, `N`) — useful but not load-bearing for the loop.
+- **Intra-line word diff** — highlight just the changed words within a `-` / `+` pair. Requires a separate diff algorithm; add when missed.
+- **Whitespace toggle** — only matters on noisy diffs.
+- **Hunk-level folding** — file + thread fold is enough.
+- **Line wrapping** — truncate long lines for v1, add wrap if needed.
+- **Multiple themes / config file** — add when there's a second theme.
+- **Auto-fetch** — branch mode never fetches; PR mode fetches via `gh` only what's needed. No background refresh.
+- **Persistent drafts across sessions** — drafts live in memory only. Re-opening on the same branch starts fresh.
+- **Comment reanchoring across edits** — stale drafts get marked, not migrated.
+
+## Open questions
+
+None right now. Spec is locked at this commit.

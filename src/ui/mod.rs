@@ -1,7 +1,8 @@
-pub mod layout;
+pub mod fold;
+pub mod help;
+pub mod input;
+pub mod render;
+pub mod scroll;
+pub mod status;
 pub mod syntax;
-pub mod widgets;
-
-pub use layout::{AppLayout, LayoutAreas, centered_rect};
-pub use syntax::Highlighter;
-pub use widgets::*;
+pub mod theme;
